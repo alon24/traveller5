@@ -1,6 +1,7 @@
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { overpassQuery } from '../services/api/overpass';
-import { findTerminalStops, getRouteByGtfsId, getFirstRouteByRef } from '../services/api/gtfsRoutes';
+import { findTerminalStops, getRouteByGtfsId, findBestTerminalsByRef } from '../services/api/gtfsRoutes';
+import { getLineStopsFromStride } from '../services/api/stride';
 
 // ── Overpass stops (OSM relation ID, numeric string) ──────────────
 async function fetchOverpassStops(relId) {
@@ -45,13 +46,25 @@ async function fetchOverpassStops(relId) {
 async function fetchGtfsTerminals(routeId) {
   const route = await getRouteByGtfsId(routeId);
   if (!route) return [];
+  // Prefer full stop list from Stride using the exact GTFS route_id so we get
+  // the correct variant (not just the first result for the line number).
+  if (route.ref) {
+    try {
+      const stops = await getLineStopsFromStride(route.ref, routeId);
+      if (stops) return stops;
+    } catch {}
+  }
   return findTerminalStops(route.from, route.to);
 }
 
 async function fetchMotLineTerminals(lineRef) {
-  const route = await getFirstRouteByRef(lineRef);
-  if (!route) return [];
-  return findTerminalStops(route.from, route.to);
+  // Prefer Stride API: returns all stops in order, not just terminals
+  try {
+    const stops = await getLineStopsFromStride(lineRef);
+    if (stops) return stops;
+  } catch {}
+  // Fallback: GTFS terminal name matching (2 stops only)
+  return findBestTerminalsByRef(lineRef);
 }
 
 function fetchRouteStops(relId) {
@@ -66,7 +79,6 @@ export function useRouteStops(relId) {
     queryFn: () => fetchRouteStops(relId),
     enabled: !!relId,
     staleTime: 10 * 60 * 1000,
-    placeholderData: keepPreviousData,
     retry: 2,
   });
 }

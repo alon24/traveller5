@@ -151,15 +151,31 @@ function parseCsv(text) {
 const AGENCY_COLORS = {
   '2':  '#1565C0', // רכבת ישראל
   '3':  '#068748', // אגד
-  '4':  '#1B5E20', // אלקטרה אפיקים
+  '4':  '#1B5E20', // אלקטרה אפיקים תחבורה
   '5':  '#B71C1C', // דן
+  '6':  '#E65100', // ש.א.מ
+  '7':  '#E65100', // נסיעות ותיירות
+  '8':  '#1565C0', // גי.בי.טורס
+  '10': '#1565C0', // מועצה אזורית אילות
   '14': '#6A1B9A', // נתיב אקספרס
   '15': '#1565C0', // מטרופולין
   '16': '#E65100', // סופרבוס
   '18': '#4A148C', // קווים
+  '20': '#880E4F', // כרמלית
+  '21': '#1B5E20', // כפיר
+  '22': '#006064', // תבל
+  '23': '#2E7D32', // גלים
+  '24': '#E65100', // מועצה אזורית גולן
   '25': '#1B5E20', // אלקטרה אפיקים
   '31': '#C62828', // דן בדרום
   '32': '#C62828', // דן באר שבע
+  '33': '#1565C0', // כבל אקספרס
+  '34': '#FF8F00', // תנופה
+  '35': '#1565C0', // בית שמש אקספרס
+  '37': '#C62828', // אקסטרה
+  '38': '#6A1B9A', // אקסטרה ירושלים
+  '39': '#B71C1C', // דן נתיבים
+  '40': '#1565C0', // יונייטד טורס
 };
 
 // ── Route name parsing ───────────────────────────────────────────────────────
@@ -241,10 +257,22 @@ function normalizeName(name) {
 function bestMatch(stops, searchName) {
   const needle = normalizeName(searchName);
   if (!needle) return null;
+  // 1. Full normalized match
   let best = stops.find(s => normalizeName(s.name).includes(needle));
-  if (!best) {
-    const firstWord = needle.split(/[\s/]+/)[0];
-    if (firstWord.length >= 3) best = stops.find(s => normalizeName(s.name).includes(firstWord));
+  if (best) return best;
+  const words = needle.split(/[\s/]+/);
+  // 2. First word (≥ 3 chars)
+  const firstWord = words[0];
+  if (firstWord.length >= 3) {
+    best = stops.find(s => normalizeName(s.name).includes(firstWord));
+    if (best) return best;
+  }
+  // 3. First two words joined (handles short abbreviations like "ת." + "רכבת")
+  if (words.length >= 2) {
+    const twoWords = words.slice(0, 2).join(' ');
+    if (twoWords.length >= 3) {
+      best = stops.find(s => normalizeName(s.name).includes(twoWords));
+    }
   }
   return best || null;
 }
@@ -269,6 +297,22 @@ export async function getRouteByGtfsId(routeId) {
 export async function getFirstRouteByRef(lineRef) {
   const routes = await getGtfsRoutes();
   return routes.find(r => r.ref === lineRef) || null;
+}
+
+/**
+ * Find terminal stops for a given line ref by trying every GTFS route with
+ * that ref until two matchable stop names are found.  Needed because line
+ * numbers are reused across cities/operators, and the first match is often
+ * the wrong city.
+ */
+export async function findBestTerminalsByRef(lineRef) {
+  const routes = await getGtfsRoutes();
+  const candidates = routes.filter(r => r.ref === lineRef);
+  for (const route of candidates) {
+    const stops = await findTerminalStops(route.from, route.to);
+    if (stops.length >= 2) return stops;
+  }
+  return [];
 }
 
 export async function searchGtfsRoutes(lineRef, city) {

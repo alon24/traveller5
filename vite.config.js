@@ -34,6 +34,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/proxy\/curlbus/, ''),
       },
+'/proxy/stride': {
+        target: 'https://open-bus-stride-api.hasadna.org.il',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/proxy\/stride/, ''),
+      },
 '/proxy/overpass/1': {
         target: 'https://overpass-api.de',
         changeOrigin: true,

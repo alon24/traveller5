@@ -1,6 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
 import { NEARBY_RADIUS_METERS } from '../config/constants';
 import { overpassQuery } from '../services/api/overpass';
+import { getGtfsRoutes } from '../services/api/gtfsRoutes';
+
+// Match a Curlbus route (lineRef + destination name) to a specific GTFS route_id
+// so we can use the exact-variant Stride lookup instead of always picking routes[0].
+async function resolveGtfsRelId(lineRef, dest) {
+  if (!dest) return `mot-line:${lineRef}`;
+  try {
+    const routes = await getGtfsRoutes();
+    const destNorm = dest.trim().replace(/['"]/g, '').toLowerCase();
+    const candidates = routes.filter(r => r.ref === lineRef);
+    const match = candidates.find(r => {
+      const toNorm = (r.to || '').replace(/['"]/g, '').toLowerCase();
+      return toNorm && (toNorm.includes(destNorm) || destNorm.includes(toNorm));
+    });
+    return match ? `gtfs:${match.routeId}` : `mot-line:${lineRef}`;
+  } catch {
+    return `mot-line:${lineRef}`;
+  }
+}
 
 function haversine(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -21,14 +40,13 @@ async function fetchCurlbusRoutes(stopCode) {
   if (data.errors?.length) return [];
   const visits = data.visits?.[String(stopCode)] || [];
   const seen = new Set();
-  return visits
-    .filter(v => v.line_name && !seen.has(v.line_name) && seen.add(v.line_name))
-    .map(v => ({
-      ref:    v.line_name,
-      to:     v.static_info?.route?.destination?.name?.HE || v.static_info?.route?.destination?.name?.EN || '',
-      colour: null,
-      relId:  `mot-line:${v.line_name}`,
-    }));
+  const unique = visits.filter(v => v.line_name && !seen.has(v.line_name) && seen.add(v.line_name));
+
+  return Promise.all(unique.map(async v => {
+    const dest = v.static_info?.route?.destination?.name?.HE || v.static_info?.route?.destination?.name?.EN || '';
+    const relId = await resolveGtfsRelId(v.line_name, dest);
+    return { ref: v.line_name, to: dest, colour: null, relId };
+  }));
 }
 
 async function fetchNearbyStops(lat, lng, radius) {
@@ -50,6 +68,24 @@ async function fetchNearbyStops(lat, lng, radius) {
   const stopNodes = data.elements.filter((e) => e.type === 'node');
   const routeRels = data.elements.filter((e) => e.type === 'relation');
 
+  // Resolve all unique OSM routes to best relId (gtfs: preferred, mot-line: fallback)
+  const uniqueOsmRoutes = new Map(); // `${ref}|||${to}` → { ref, to, colour }
+  for (const rel of routeRels) {
+    const ref = rel.tags?.ref || '';
+    if (!ref) continue;
+    const to = rel.tags?.to || rel.tags?.name || '';
+    const colour = rel.tags?.colour || rel.tags?.color || null;
+    const key = `${ref}|||${to}`;
+    if (!uniqueOsmRoutes.has(key)) uniqueOsmRoutes.set(key, { ref, to, colour });
+  }
+  const resolvedOsmRelIds = new Map();
+  await Promise.all(
+    [...uniqueOsmRoutes.entries()].map(async ([key, { ref, to }]) => {
+      const relId = await resolveGtfsRelId(ref, to);
+      resolvedOsmRelIds.set(key, relId);
+    })
+  );
+
   // Build nodeId → routes map from relation members
   const nodeRoutes = {};
   for (const rel of routeRels) {
@@ -57,13 +93,15 @@ async function fetchNearbyStops(lat, lng, radius) {
     if (!ref) continue;
     const to = rel.tags?.to || rel.tags?.name || '';
     const colour = rel.tags?.colour || rel.tags?.color || null;
+    const key = `${ref}|||${to}`;
+    const resolvedRelId = resolvedOsmRelIds.get(key) || String(rel.id);
 
     for (const member of rel.members || []) {
       if (member.type !== 'node') continue;
       if (!nodeRoutes[member.ref]) nodeRoutes[member.ref] = new Map();
       // key by ref so we deduplicate lines with multiple stops nearby
       if (!nodeRoutes[member.ref].has(ref)) {
-        nodeRoutes[member.ref].set(ref, { ref, to, colour, relId: rel.id });
+        nodeRoutes[member.ref].set(ref, { ref, to, colour, relId: resolvedRelId });
       }
     }
   }

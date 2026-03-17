@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo } from 'react';
-import { GoogleMap, useJsApiLoader, Circle, Polyline } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Circle } from '@react-google-maps/api';
 import { Loader } from 'lucide-react';
 import { GOOGLE_MAPS_LIBRARIES } from '../map/TransitMap';
 import { useLocationStore } from '../../stores/useLocationStore';
@@ -23,7 +23,8 @@ function computeBearing(lat1, lng1, lat2, lng2) {
 
 export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops, routeShape, routeColor, busPositions, routeLoading }) {
   const coords = useLocationStore((s) => s.coords);
-  const mapRef = useRef(null);
+  const mapRef    = useRef(null);
+  const polyRef   = useRef(null); // google.maps.Polyline instance
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
@@ -51,7 +52,6 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
     if (anchorPoints) {
       const bounds = new window.google.maps.LatLngBounds();
       anchorPoints.forEach((s) => bounds.extend({ lat: s.lat, lng: s.lng }));
-      if (coords && !shapePoints) bounds.extend(coords);
       mapRef.current.fitBounds(bounds, 40);
     } else if (selectedId) {
       const stop = stops.find((s) => s.id === selectedId);
@@ -59,15 +59,49 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
     }
   }, [selectedId, routeStopsWithBearing, routeShape, isLoaded]);
 
-  if (!isLoaded) return <LoadingSpinner className="h-full bg-gray-900" />;
+  const color = routeColor || '#1565C0';
 
-  // If a Directions-based shape is available use it for the polyline;
-  // otherwise fall back to connecting the route stops directly.
-  const polylinePath = (routeShape && routeShape.length > 1)
-    ? routeShape
-    : routeStopsWithBearing.map((s) => ({ lat: s.lat, lng: s.lng }));
+  // Manage the route polyline directly so it is always removed/updated cleanly.
+  // Using <Polyline> from @react-google-maps/api can leave stale instances on
+  // the map when the component unmounts or the path switches between sources.
+  const polylinePath = useMemo(
+    () => (routeShape && routeShape.length > 1)
+      ? routeShape
+      : routeStopsWithBearing.map((s) => ({ lat: s.lat, lng: s.lng })),
+    [routeShape, routeStopsWithBearing],
+  );
+
+  useEffect(() => {
+    if (!isLoaded || !mapRef.current) return;
+    const maps = window.google?.maps;
+    if (!maps) return;
+
+    // Create the polyline once and reuse it (avoids leaving stale instances on map)
+    if (!polyRef.current) {
+      polyRef.current = new maps.Polyline({
+        strokeOpacity: 0.85,
+        strokeWeight:  4,
+        zIndex:        20,
+      });
+    }
+
+    if (polylinePath.length <= 1) {
+      // No route selected — hide the polyline
+      polyRef.current.setMap(null);
+    } else {
+      polyRef.current.setOptions({ strokeColor: color });
+      polyRef.current.setPath(polylinePath);
+      polyRef.current.setMap(mapRef.current);
+    }
+  }, [polylinePath, isLoaded, color]);
+
+  // Remove the polyline when NearbyMap unmounts entirely
+  useEffect(() => {
+    return () => { if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null; } };
+  }, []);
+
+  if (!isLoaded) return <LoadingSpinner className="h-full bg-gray-900" />;
   const routeStopIds = new Set(routeStopsWithBearing.map((s) => s.id));
-  const color = routeColor || '#F59E0B';
 
   return (
     <div className="relative w-full h-full">
@@ -96,15 +130,7 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
         </>
       )}
 
-      {/* Route polyline */}
-      {polylinePath.length > 1 && (
-        <Polyline path={polylinePath} options={{
-          strokeColor: color,
-          strokeOpacity: 0.85,
-          strokeWeight: 4,
-          zIndex: 20,
-        }} />
-      )}
+      {/* Route polyline is managed directly via polyRef — see useEffect above */}
 
       {/* Route terminal markers: arrow at start, dot at end */}
       {routeStopsWithBearing.length >= 1 && (() => {
@@ -154,6 +180,30 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
           </>
         );
       })()}
+
+      {/* Intermediate route stop markers (all stops between first and last) */}
+      {routeStopsWithBearing.slice(1, -1).map((stop) => {
+        const isNearby   = !!nearbyById[stop.id];
+        const isSelected = stop.id === selectedId;
+        const sz = isSelected ? 12 : 7;
+        return (
+          <AdvancedMarker
+            key={`route-mid-${stop.id}`}
+            position={{ lat: stop.lat, lng: stop.lng }}
+            title={stop.name || ''}
+            zIndex={isSelected ? 55 : isNearby ? 35 : 15}
+            onClick={isNearby ? () => onSelectStop(stop.id === selectedId ? null : stop.id) : undefined}
+            cursor={isNearby ? 'pointer' : 'default'}
+          >
+            <div style={{
+              width: sz, height: sz, borderRadius: '50%',
+              background: isSelected ? '#3B82F6' : color,
+              border: `${isSelected ? 2 : 1.5}px solid #fff`,
+              opacity: 0.9,
+            }} />
+          </AdvancedMarker>
+        );
+      })}
 
       {/* Nearby stop circles (those not already shown as route arrows) */}
       {stops.filter((s) => !routeStopIds.has(s.id)).map((stop) => {

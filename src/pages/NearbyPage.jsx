@@ -60,46 +60,37 @@ function RouteBadge({ route, stopId, stopName, active, onClick }) {
   );
 }
 
-// ── Live arrivals panel ──────────────────────────────────────────
-function ArrivalsPanel({ stopCode }) {
-  const { data: arrivals = [], isLoading, error, dataUpdatedAt } = useStopArrivals(stopCode);
+// ── Compact line-specific arrivals strip ─────────────────────────
+function LineArrivalsStrip({ stopCode, lineRef, colour }) {
+  const { data: arrivals = [], isLoading, dataUpdatedAt } = useStopArrivals(stopCode);
 
-  if (isLoading) return (
-    <div className="flex items-center gap-1.5 px-1 py-2 text-gray-500">
-      <Loader size={11} className="animate-spin" />
-      <span className="text-[10px]">Loading arrivals…</span>
-    </div>
-  );
-
-  if (error) return (
-    <p className="text-[10px] text-gray-600 px-1 py-1.5">No live data for this stop</p>
-  );
-
-  if (arrivals.length === 0) return (
-    <p className="text-[10px] text-gray-600 px-1 py-1.5">No buses in the next 30 min</p>
-  );
-
-  const updated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const lineArrivals = arrivals.filter((a) => a.lineRef === lineRef).slice(0, 4);
+  const updated = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+    : '';
 
   return (
-    <div className="mt-1.5 mb-0.5">
-      <div className="flex items-center gap-1 mb-1">
-        <Clock size={9} className="text-gray-600" />
-        <span className="text-[9px] text-gray-600 uppercase tracking-wider">Live arrivals{updated ? ` · ${updated}` : ''}</span>
-      </div>
-      <div className="space-y-0.5">
-        {arrivals.slice(0, 5).map((a, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="shrink-0 w-7 text-center text-[10px] font-bold font-mono text-white bg-gray-700 rounded px-1 py-0.5">
-              {a.lineRef}
+    <div className="flex items-center gap-1.5 mt-1 min-h-[18px]">
+      <Clock size={9} className="text-gray-500 shrink-0" />
+      {isLoading ? (
+        <Loader size={9} className="animate-spin text-gray-500" />
+      ) : lineArrivals.length === 0 ? (
+        <span className="text-[9px] text-gray-600">No arrivals in 30 min</span>
+      ) : (
+        <>
+          {lineArrivals.map((a, i) => (
+            <span key={i} className="flex items-center gap-1">
+              {i > 0 && <span className="text-gray-700">·</span>}
+              <span className={`text-[10px] font-semibold tabular-nums ${
+                a.etaMinutes <= 2 ? 'text-red-400' : a.etaMinutes <= 5 ? 'text-yellow-400' : 'text-emerald-400'
+              }`}>
+                {a.etaMinutes === 0 ? 'Now' : `${a.etaMinutes}m`}
+              </span>
             </span>
-            <span className="flex-1 text-[10px] text-gray-400 truncate" dir="auto">{a.destination}</span>
-            <span className={`shrink-0 text-[10px] font-medium tabular-nums ${a.etaMinutes <= 2 ? 'text-red-400' : a.etaMinutes <= 5 ? 'text-yellow-400' : 'text-emerald-400'}`}>
-              {a.etaMinutes === 0 ? 'Now' : `${a.etaMinutes}m`}
-            </span>
-          </div>
-        ))}
-      </div>
+          ))}
+          {updated && <span className="text-[9px] text-gray-700 ml-auto shrink-0">{updated}</span>}
+        </>
+      )}
     </div>
   );
 }
@@ -135,7 +126,9 @@ function StopRow({ stop, selected, onClick, selectedLine, onLineClick, rowRef })
       ) : (
         <p className="text-[10px] text-gray-700 mt-0.5">No line data</p>
       )}
-      {selected && stop.ref && <ArrivalsPanel stopCode={stop.ref} />}
+      {selectedLine && selectedLine.stopId === stop.id && stop.ref && (
+        <LineArrivalsStrip stopCode={stop.ref} lineRef={selectedLine.ref} colour={selectedLine.colour} />
+      )}
     </div>
   );
 }
@@ -621,9 +614,9 @@ export default function NearbyPage() {
               tab === 'favorites' ? favRouteShape : null
             }
             routeColor={
-              tab === 'lines' ? (selectedSearchLine?.colour || '#F59E0B') :
-              tab === 'favorites' ? (selectedFav?.routeColour || '#F59E0B') :
-              (selectedLine?.colour || '#F59E0B')
+              tab === 'lines' ? (selectedSearchLine?.colour || '#1565C0') :
+              tab === 'favorites' ? (selectedFav?.routeColour || '#1565C0') :
+              (selectedLine?.colour || '#1565C0')
             }
             busPositions={busPositions}
             routeLoading={
