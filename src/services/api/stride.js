@@ -14,9 +14,135 @@ const BASE = '/proxy/stride';
 // Session-level cache keyed by gtfsRouteId when available, else lineRef
 const _cache = new Map();
 
-export async function getLineStopsFromStride(lineRef, gtfsRouteId = null) {
+// Cache: relId → numeric SIRI line_ref
+const _siriLineRefCache = new Map();
+
+// Cache: `${stopCode}:${lineNumber}` → array of line_refs (or null)
+const _stopLineCache = new Map();
+
+/**
+ * Given a MOT stop code and a route short name (e.g. "16"), returns the
+ * SIRI line_ref values for routes that actually serve that stop.
+ * This prevents line 16 in Rehovot from matching line 16 in Tel Aviv.
+ */
+export async function getLineRefsForStopAndLine(stopCode, lineNumber, signal) {
+  if (!stopCode || !lineNumber) return null;
+  const key = `${stopCode}:${lineNumber}`;
+  if (_stopLineCache.has(key)) return _stopLineCache.get(key);
+
+  try {
+    const today = new Date();
+    const dayStart = new Date(today); dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd   = new Date(today); dayEnd.setUTCHours(23, 59, 59, 0);
+    const from = dayStart.toISOString().replace('Z', '+00:00');
+    const to   = dayEnd.toISOString().replace('Z', '+00:00');
+    const res = await fetch(
+      `${BASE}/gtfs_ride_stops/list?gtfs_stop__code=${encodeURIComponent(stopCode)}&gtfs_route__route_short_name=${encodeURIComponent(lineNumber)}&arrival_time_from=${encodeURIComponent(from)}&arrival_time_to=${encodeURIComponent(to)}&limit=20`,
+      { signal },
+    );
+    if (!res.ok) { _stopLineCache.set(key, null); return null; }
+    const items = await res.json();
+    if (!items?.length) { _stopLineCache.set(key, null); return null; }
+
+    const lineRefs = [...new Set(items.map(i => i.gtfs_route__line_ref).filter(x => x != null))];
+    _stopLineCache.set(key, lineRefs.length ? lineRefs : null);
+    return lineRefs.length ? lineRefs : null;
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    _stopLineCache.set(key, null);
+    return null;
+  }
+}
+
+/**
+ * Resolve a route relId to its numeric SIRI line_ref, which is the key
+ * for querying siri_vehicle_locations without an API key.
+ * Returns null if the line cannot be resolved.
+ */
+export async function getSiriLineRef(relId) {
+  if (!relId) return null;
+  if (_siriLineRefCache.has(relId)) return _siriLineRefCache.get(relId);
+
+  // For gtfs: relIds the numeric part IS the SIRI line_ref — no extra HTTP request
+  if (relId.startsWith('gtfs:')) {
+    const lineRef = parseInt(relId.slice(5), 10);
+    if (!isNaN(lineRef)) {
+      _siriLineRefCache.set(relId, [lineRef]);
+      return [lineRef];
+    }
+  }
+
+  // For mot-line: look up ALL line_refs for this route_short_name (multiple operators possible)
+  // relId may be "mot-line:16" or "mot-line:16:STOPCODE" — extract just the line number
+  if (relId.startsWith('mot-line:')) {
+    const lineNumber = relId.slice(9).split(':')[0];
+    const today = new Date().toISOString().slice(0, 10);
+    const routesRes = await fetch(
+      `${BASE}/gtfs_routes/list?route_short_name=${encodeURIComponent(lineNumber)}&date_from=${today}&limit=30`,
+    );
+    if (!routesRes.ok) return null;
+    const routes = await routesRes.json();
+    if (!routes.length) return null;
+    // Deduplicate line_refs, cap at 10 to avoid excessive parallel SIRI requests
+    const lineRefs = [...new Set(routes.map(r => r.line_ref))].slice(0, 10);
+    _siriLineRefCache.set(relId, lineRefs);
+    return lineRefs;
+  }
+
+  return null;
+}
+
+/**
+ * Fetch current vehicle positions for one or more SIRI line_refs.
+ * Uses a 10-minute window to account for Stride ingestion delay (~2 min).
+ * Deduplicates by vehicle_ref, keeping the most recent position per bus.
+ */
+export async function fetchSiriVehicleLocations(siriLineRefs) {
+  const refs = Array.isArray(siriLineRefs) ? siriLineRefs : [siriLineRefs];
+  if (!refs.length) return [];
+
+  const now = new Date();
+  const from = new Date(now - 10 * 60 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+  const to   = now.toISOString().replace(/\.\d+Z$/, 'Z');
+
+  // Fetch all line_refs in parallel
+  const results = await Promise.all(refs.map(ref =>
+    fetch(`${BASE}/siri_vehicle_locations/list?siri_routes__line_ref=${ref}&recorded_at_time_from=${from}&recorded_at_time_to=${to}&limit=100`)
+      .then(r => r.ok ? r.json() : [])
+      .catch(() => [])
+  ));
+  const items = results.flat().filter(Array.isArray(results) ? Boolean : Boolean);
+
+  // Keep only the latest ping per vehicle
+  const byVehicle = new Map();
+  for (const item of items) {
+    const id = item.siri_ride__vehicle_ref || item.id;
+    const prev = byVehicle.get(id);
+    if (!prev || new Date(item.recorded_at_time) > new Date(prev.recorded_at_time)) {
+      byVehicle.set(id, item);
+    }
+  }
+
+  return [...byVehicle.values()].map(item => ({
+    vehicleId:  String(item.siri_ride__vehicle_ref || item.id),
+    lat:        item.lat,
+    lng:        item.lon,
+    bearing:    item.bearing ?? 0,
+    velocity:   item.velocity ?? 0,
+    recordedAt: item.recorded_at_time ?? null,
+  }));
+}
+
+export function getLineStopsFromStride(lineRef, gtfsRouteId = null) {
   const cacheKey = gtfsRouteId ? `route:${gtfsRouteId}` : `line:${lineRef}`;
   if (_cache.has(cacheKey)) return _cache.get(cacheKey);
+  // Store the promise immediately so concurrent callers share one in-flight request
+  const promise = _fetchLineStops(lineRef, gtfsRouteId, cacheKey);
+  _cache.set(cacheKey, promise);
+  return promise;
+}
+
+async function _fetchLineStops(lineRef, gtfsRouteId, cacheKey) {
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -60,6 +186,5 @@ export async function getLineStopsFromStride(lineRef, gtfsRouteId = null) {
       lng:  item.gtfs_stop__lon,
     }));
 
-  if (stops.length >= 2) _cache.set(cacheKey, stops);
   return stops.length >= 2 ? stops : null;
 }

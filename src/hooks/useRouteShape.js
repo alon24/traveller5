@@ -6,23 +6,42 @@ async function getStopsForShape(relId) {
   if (relId.startsWith('gtfs:')) {
     const gtfsRouteId = relId.slice(5);
     const route = await getRouteByGtfsId(gtfsRouteId);
-    if (!route) return null;
-    // Use exact GTFS route_id so Stride returns the correct variant's stops
-    if (route.ref) {
+    if (route?.ref) {
       try {
         const stops = await getLineStopsFromStride(route.ref, gtfsRouteId);
         if (stops) return stops;
       } catch {}
+      return findTerminalStops(route.from, route.to);
     }
-    return findTerminalStops(route.from, route.to);
-  }
-  if (relId.startsWith('mot-line:')) {
-    // Prefer full stop list from Stride; fall back to GTFS terminal matching
+    // gtfsRouteId is a SIRI line_ref (integer) — use Stride directly
     try {
-      const stops = await getLineStopsFromStride(relId.slice(9));
+      const stops = await getLineStopsFromStride(null, gtfsRouteId);
       if (stops) return stops;
     } catch {}
-    return findBestTerminalsByRef(relId.slice(9));
+    return null;
+  }
+  if (relId.startsWith('mot-line:')) {
+    const lineRefAndStop = relId.slice(9); // "16" or "16:stopCode"
+    const colonIdx = lineRefAndStop.indexOf(':');
+    const lineRef  = colonIdx === -1 ? lineRefAndStop : lineRefAndStop.slice(0, colonIdx);
+    const stopCode = colonIdx === -1 ? null           : lineRefAndStop.slice(colonIdx + 1);
+
+    if (stopCode) {
+      try {
+        const { getLineRefsForStopAndLine } = await import('../services/api/stride');
+        const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef);
+        if (lineRefs?.length) {
+          const stops = await getLineStopsFromStride(null, lineRefs[0]);
+          if (stops) return stops;
+        }
+      } catch {}
+    }
+
+    try {
+      const stops = await getLineStopsFromStride(lineRef);
+      if (stops) return stops;
+    } catch {}
+    return findBestTerminalsByRef(lineRef);
   }
   return null; // OSM relation — shape comes from routeStops directly
 }
@@ -109,6 +128,17 @@ async function fetchShape(relId) {
   return shape.length >= 2 ? shape : null;
 }
 
+// Module-level shape cache keyed by normalized line ref ("mot-line:16", "gtfs:12345").
+// Route shapes are stable for the browser session (route geometry changes < once a day).
+const _shapeCache = new Map(); // cacheKey → Promise<shape>
+
+function normalizeShapeKey(relId) {
+  if (!relId?.startsWith('mot-line:')) return relId;
+  const inner = relId.slice(9);
+  const colon = inner.indexOf(':');
+  return colon === -1 ? relId : `mot-line:${inner.slice(0, colon)}`;
+}
+
 // Returns null while loading, [] if no shape found, or [{lat, lng}] on success.
 // Only fires for gtfs: / mot-line: prefixes; OSM relation IDs return null so
 // NearbyMap falls back to the routeStops sequence.
@@ -122,7 +152,14 @@ export function useRouteShape(relId) {
     }
     let cancelled = false;
     setShape(null); // clear previous while loading
-    fetchShape(relId)
+
+    const cacheKey = normalizeShapeKey(relId);
+    let promise = _shapeCache.get(cacheKey);
+    if (!promise) {
+      promise = fetchShape(relId).catch(() => []);
+      _shapeCache.set(cacheKey, promise);
+    }
+    promise
       .then((s) => { if (!cancelled) setShape(s ?? []); })
       .catch(() => { if (!cancelled) setShape([]); });
     return () => { cancelled = true; };

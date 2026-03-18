@@ -4,7 +4,8 @@ import { useLocationStore } from '../stores/useLocationStore';
 import { useNearbyStops } from '../hooks/useNearbyStops';
 import { useRouteStops } from '../hooks/useRouteStops';
 import { useRouteShape } from '../hooks/useRouteShape';
-import { useVehiclePositions } from '../hooks/useGtfsRealtime';
+import { useRelIdResolver } from '../hooks/useRelIdResolver';
+import { useSiriVehiclePositions } from '../hooks/useGtfsRealtime';
 import { useTrainSchedule } from '../hooks/useTrainSchedule';
 import { useLineSearch } from '../hooks/useLineSearch';
 import { useFavoritesStore } from '../stores/useFavoritesStore';
@@ -27,11 +28,24 @@ function haversine(lat1, lng1, lat2, lng2) {
 
 const NEARBY_FLEX = { default: [55, 45], list: [80, 20], map: [28, 72] };
 
-// ── Route badge with star ───────────────────────────────────────
-function RouteBadge({ route, stopId, stopName, active, onClick }) {
+// Extract the destination city from a raw GTFS "to" string.
+// Input examples: "אקווריום ישראל-ירושלים-3א", "מרכז ביג/המשק-באר שבע", "רחובות"
+// Output: "ירושלים", "באר שבע", "רחובות"
+function toCity(to) {
+  if (!to) return '';
+  // Strip trailing variant suffix: -<digits><optional Hebrew letter>
+  const clean = to.replace(/-\d+[א-ת]?$/, '').trim();
+  // The city is the last segment after a '-'
+  const dash = clean.lastIndexOf('-');
+  return dash >= 0 ? clean.slice(dash + 1).trim() : clean;
+}
+
+// ── Single line row (li) inside a stop ──────────────────────────
+function LineRow({ route, stopId, stopName, active, onClick }) {
   const bg = route.colour || '#1e3a5f';
   const isFav = useFavoritesStore((s) => s.isFavorite(stopId, route.ref, route.relId));
   const toggle = useFavoritesStore((s) => s.toggle);
+  const dest = toCity(route.to);
 
   const handleStar = (e) => {
     e.stopPropagation();
@@ -39,24 +53,36 @@ function RouteBadge({ route, stopId, stopName, active, onClick }) {
   };
 
   return (
-    <span className="shrink-0 flex items-center rounded overflow-hidden">
-      <button
-        onMouseDown={(e) => { e.stopPropagation(); onClick(route); }}
-        className={`px-1.5 py-0.5 text-xs font-bold font-mono transition-all ${active ? 'ring-2 ring-inset ring-white scale-110' : 'opacity-90 hover:opacity-100'}`}
-        style={{ backgroundColor: bg, color: '#fff' }}
-        title={route.to ? `→ ${route.to}` : route.ref}
+    <li
+      className={`flex items-center gap-2 px-2 py-1 rounded transition-colors cursor-pointer select-none
+        ${active ? 'bg-blue-950/60 ring-1 ring-blue-500/50' : 'hover:bg-gray-800/40'}`}
+      onMouseDown={(e) => { e.stopPropagation(); onClick(route); }}
+    >
+      {/* Line number badge */}
+      <span
+        className="shrink-0 min-w-[2rem] text-center px-1.5 py-0.5 rounded text-xs font-bold font-mono text-white"
+        style={{ backgroundColor: bg }}
       >
         {route.ref}
-      </button>
+      </span>
+
+      {/* Direction arrow + destination */}
+      <span className="flex-1 flex items-center gap-1 min-w-0" dir="rtl">
+        <span className="text-gray-500 text-[10px] shrink-0">→</span>
+        <span className={`text-xs truncate ${dest ? 'text-gray-300' : 'text-gray-600'}`}>
+          {dest || '—'}
+        </span>
+      </span>
+
+      {/* Star */}
       <button
         onMouseDown={handleStar}
-        className="px-1 py-0.5 transition-colors"
-        style={{ backgroundColor: bg, opacity: isFav ? 1 : 0.5 }}
+        className={`shrink-0 transition-colors ${isFav ? 'text-yellow-400' : 'text-gray-700 hover:text-gray-400'}`}
         title={isFav ? 'Remove from favorites' : 'Add to favorites'}
       >
-        <Star size={9} fill={isFav ? '#fff' : 'none'} color="#fff" />
+        <Star size={10} fill={isFav ? 'currentColor' : 'none'} />
       </button>
-    </span>
+    </li>
   );
 }
 
@@ -97,37 +123,48 @@ function LineArrivalsStrip({ stopCode, lineRef, colour }) {
 
 // ── Stop row ─────────────────────────────────────────────────────
 function StopRow({ stop, selected, onClick, selectedLine, onLineClick, rowRef }) {
+  const activeLineRef = selectedLine?.stopId === stop.id ? selectedLine?.ref : null;
+
   return (
     <div
       ref={rowRef}
-      onClick={onClick}
-      className={`px-3 py-1.5 border-b border-gray-800/50 cursor-pointer transition-colors ${selected ? 'bg-blue-950/40 border-l-2 border-l-blue-500 pl-2.5' : 'hover:bg-gray-800/30'}`}
+      className={`border-b border-gray-800/50 transition-colors ${selected ? 'bg-blue-950/20 border-l-2 border-l-blue-500' : ''}`}
     >
-      <div className="flex items-center justify-between gap-2">
+      {/* Stop header — click to expand/collapse */}
+      <div
+        onClick={onClick}
+        className="flex items-center justify-between gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-800/30"
+      >
         <div className="min-w-0 flex items-center gap-1.5">
+          <MapPin size={11} className="text-gray-500 shrink-0" />
           <span className="text-xs font-medium text-white truncate">{stop.name}</span>
           {stop.ref && <span className="text-[10px] text-gray-500 shrink-0">#{stop.ref}</span>}
         </div>
         <span className="text-[10px] text-gray-500 shrink-0">{stop.distance}m</span>
       </div>
+
+      {/* Lines list */}
       {stop.routes.length > 0 ? (
-        <div className="flex gap-1 mt-1 overflow-x-auto pb-0.5 no-scrollbar">
+        <ul className="px-2 pb-1.5 space-y-0.5">
           {stop.routes.map((r) => (
-            <RouteBadge
+            <LineRow
               key={r.ref}
               route={r}
               stopId={stop.id}
               stopName={stop.name}
-              active={selectedLine?.ref === r.ref && selectedLine?.stopId === stop.id}
-              onClick={(route) => onLineClick(route, stop.id)}
+              active={activeLineRef === r.ref}
+              onClick={(route) => onLineClick(route, stop)}
             />
           ))}
-        </div>
+          {/* Arrivals for the active line */}
+          {activeLineRef && stop.ref && (
+            <li className="pt-0.5">
+              <LineArrivalsStrip stopCode={stop.ref} lineRef={activeLineRef} colour={selectedLine.colour} />
+            </li>
+          )}
+        </ul>
       ) : (
-        <p className="text-[10px] text-gray-700 mt-0.5">No line data</p>
-      )}
-      {selectedLine && selectedLine.stopId === stop.id && stop.ref && (
-        <LineArrivalsStrip stopCode={stop.ref} lineRef={selectedLine.ref} colour={selectedLine.colour} />
+        <p className="text-[10px] text-gray-700 px-3 pb-1.5">No line data</p>
       )}
     </div>
   );
@@ -266,7 +303,7 @@ export default function NearbyPage() {
   const { data: stops = [], isLoading: stopsLoading, error: stopsError, refetch } = useNearbyStops(coords?.lat, coords?.lng);
   const { data: routeStops = [], isFetching: routeLoading } = useRouteStops(selectedLine?.relId);
   const nearbyRouteShape = useRouteShape(selectedLine?.relId);
-  const { data: allVehicles = [] } = useVehiclePositions();
+  const resolveRelId = useRelIdResolver();
 
   useEffect(() => {
     if (!selectedId) return;
@@ -278,14 +315,27 @@ export default function NearbyPage() {
     if (mode === 'list') setMode('default');
   };
 
-  const handleLineClick = (route, stopId) => {
+  const handleLineClick = (route, stop) => {
+    const stopId = typeof stop === 'object' ? stop.id : stop;
     if (selectedLine?.ref === route.ref && selectedLine?.stopId === stopId) {
       setSelectedLine(null);
       setMode('default');
-    } else {
-      setSelectedLine({ ref: route.ref, relId: route.relId, colour: route.colour, stopId });
-      setMode('map');
+      return;
     }
+    // relId stays as mot-line: for the lifetime of this selection —
+    // changing it would re-trigger useRouteShape and cause a flicker.
+    // Encode the stop's MOT code into relId so route/shape lookups can use
+    // a stop-correlated Stride query and pick the right city variant.
+    const stopCode = typeof stop === 'object' ? stop.ref : '';
+    const relId = stopCode ? `mot-line:${route.ref}:${stopCode}` : route.relId;
+    setSelectedLine({ ref: route.ref, relId, colour: route.colour, stopId });
+    setMode('map');
+
+    // Resolve precise relId for accurate stop/shape matching (city dedup).
+    // Result intentionally NOT fed back into selectedLine — that would re-trigger
+    // useRouteShape and cause flicker. mot-line: works for stops, shape and SIRI.
+    const stopRef = typeof stop === 'object' ? stop.ref : null;
+    if (stopRef) resolveRelId(stopRef, route.ref, route.to);
   };
 
   const clearLine = (e) => {
@@ -325,19 +375,21 @@ export default function NearbyPage() {
     useRouteStops(selectedFav?.routeRelId);
   const favRouteShape = useRouteShape(selectedFav?.routeRelId);
 
-  // Whichever tab is active, pick the right route stops for bus filtering
+  // Whichever tab is active, pick the right route stops / relId for bus filtering
   const activeRouteStops = tab === 'favorites' ? favRouteStops
     : tab === 'lines' ? searchRouteStops
     : routeStops;
 
-  const busPositions = useMemo(() => {
-    if (!allVehicles.length) return [];
-    if (activeRouteStops.length) {
-      return allVehicles.filter((v) => activeRouteStops.some((s) => haversine(v.lat, v.lng, s.lat, s.lng) <= 400));
-    }
-    if (!coords) return [];
-    return allVehicles.filter((v) => haversine(v.lat, v.lng, coords.lat, coords.lng) <= 1000);
-  }, [allVehicles, activeRouteStops, coords]);
+  const activeRelId =
+    tab === 'favorites' ? selectedFav?.routeRelId :
+    tab === 'lines'     ? selectedSearchLine?.relId :
+    selectedLine?.relId;
+
+  // Poll SIRI vehicle positions only when a line is active (no API key needed)
+  const { data: allVehicles = [] } = useSiriVehiclePositions(activeRelId);
+
+  // allVehicles already scoped to the active line by useSiriVehiclePositions
+  const busPositions = allVehicles;
 
   // ── Trains tab state ──
   const [trainFrom, setTrainFrom] = useState(null);
@@ -597,6 +649,25 @@ export default function NearbyPage() {
         className="relative shrink-0 min-h-0 border-t-2 border-blue-900/60 rounded-t-xl overflow-hidden"
         style={{ flex: bottomFlex, transition: 'flex 0.35s cubic-bezier(0.4,0,0.2,1)' }}
       >
+        {/* Floating selected-line badge */}
+        {activeRelId && (() => {
+          const line =
+            tab === 'favorites' ? { ref: selectedFav?.routeRef,         colour: selectedFav?.routeColour } :
+            tab === 'lines'     ? { ref: selectedSearchLine?.ref,        colour: selectedSearchLine?.colour } :
+                                  { ref: selectedLine?.ref,              colour: selectedLine?.colour };
+          if (!line?.ref) return null;
+          return (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+              <span
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold font-mono text-white shadow-lg"
+                style={{ backgroundColor: line.colour || '#1e3a5f', boxShadow: `0 2px 12px ${line.colour || '#1e3a5f'}88` }}
+              >
+                🚌 {line.ref}
+              </span>
+            </div>
+          );
+        })()}
+
         {/* NearbyMap stays mounted always to avoid Google Maps re-init crash */}
         <div className="w-full h-full" style={{ visibility: showTrainMap ? 'hidden' : 'visible' }}>
           <NearbyMap
@@ -619,10 +690,15 @@ export default function NearbyPage() {
               (selectedLine?.colour || '#1565C0')
             }
             busPositions={busPositions}
+            activeLine={
+              tab === 'favorites' ? { ref: selectedFav?.routeRef,        to: selectedFav?.routeTo        || '' } :
+              tab === 'lines'     ? { ref: selectedSearchLine?.ref,       to: selectedSearchLine?.to      || '' } :
+                                    { ref: selectedLine?.ref,             to: selectedLine?.to            || '' }
+            }
             routeLoading={
-              (tab === 'nearby' && !!selectedLine && routeLoading) ||
-              (tab === 'lines' && !!selectedSearchLine && searchRouteLoading) ||
-              (tab === 'favorites' && !!selectedFav && favRouteLoading)
+              (tab === 'nearby'    && !!selectedLine       && (routeLoading       || nearbyRouteShape  === null)) ||
+              (tab === 'lines'     && !!selectedSearchLine && (searchRouteLoading || searchRouteShape  === null)) ||
+              (tab === 'favorites' && !!selectedFav        && (favRouteLoading    || favRouteShape     === null))
             }
           />
         </div>

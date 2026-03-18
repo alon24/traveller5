@@ -45,25 +45,45 @@ async function fetchOverpassStops(relId) {
 
 async function fetchGtfsTerminals(routeId) {
   const route = await getRouteByGtfsId(routeId);
-  if (!route) return [];
-  // Prefer full stop list from Stride using the exact GTFS route_id so we get
-  // the correct variant (not just the first result for the line number).
-  if (route.ref) {
+  if (route?.ref) {
     try {
       const stops = await getLineStopsFromStride(route.ref, routeId);
       if (stops) return stops;
     } catch {}
+    return findTerminalStops(route.from, route.to);
   }
-  return findTerminalStops(route.from, route.to);
+  // routeId is a SIRI line_ref (integer) — getRouteByGtfsId won't find it in
+  // the local GTFS ZIP. Fall back to Stride which accepts line_refs directly.
+  try {
+    const stops = await getLineStopsFromStride(null, routeId);
+    if (stops) return stops;
+  } catch {}
+  return [];
 }
 
-async function fetchMotLineTerminals(lineRef) {
-  // Prefer Stride API: returns all stops in order, not just terminals
+async function fetchMotLineTerminals(lineRefAndStop) {
+  // relId format: "16" or "16:stopCode" (stop code appended for city precision)
+  const colonIdx = lineRefAndStop.indexOf(':');
+  const lineRef  = colonIdx === -1 ? lineRefAndStop : lineRefAndStop.slice(0, colonIdx);
+  const stopCode = colonIdx === -1 ? null           : lineRefAndStop.slice(colonIdx + 1);
+
+  // Stop-correlated lookup: resolves the exact SIRI line_ref serving this stop,
+  // avoiding city collisions (e.g. line 16 in Jerusalem vs Haifa).
+  if (stopCode) {
+    try {
+      const { getLineRefsForStopAndLine } = await import('../services/api/stride');
+      const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef);
+      if (lineRefs?.length) {
+        const stops = await getLineStopsFromStride(null, lineRefs[0]);
+        if (stops) return stops;
+      }
+    } catch {}
+  }
+
   try {
     const stops = await getLineStopsFromStride(lineRef);
     if (stops) return stops;
   } catch {}
-  // Fallback: GTFS terminal name matching (2 stops only)
   return findBestTerminalsByRef(lineRef);
 }
 
@@ -73,12 +93,25 @@ function fetchRouteStops(relId) {
   return fetchOverpassStops(relId);
 }
 
+// Normalize the cache key for mot-line: relIds so that the same line number
+// at different stops on the same route shares one React Query cache entry.
+// "mot-line:16:12345" → "mot-line:16"   (stop code stripped from key only)
+// The full relId (with stop code) is still passed to the fetch fn for city-precise lookup.
+function normalizeRelIdKey(relId) {
+  if (!relId?.startsWith('mot-line:')) return relId;
+  const inner  = relId.slice(9);
+  const colon  = inner.indexOf(':');
+  return colon === -1 ? relId : `mot-line:${inner.slice(0, colon)}`;
+}
+
 export function useRouteStops(relId) {
+  const cacheKey = normalizeRelIdKey(relId);
   return useQuery({
-    queryKey: ['route-stops', relId],
+    queryKey: ['route-stops', cacheKey],
     queryFn: () => fetchRouteStops(relId),
     enabled: !!relId,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 60 * 60 * 1000, // route stops change ≤ once a day
+    gcTime:    90 * 60 * 1000,
     retry: 2,
   });
 }

@@ -22,8 +22,9 @@ export default function SettingsPage() {
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    language: 'he',
+    region: 'IL',
     libraries: GOOGLE_MAPS_LIBRARIES,
-    language: 'iw', // Hebrew-first, falls back to English
   });
 
   // Init Google services once loaded

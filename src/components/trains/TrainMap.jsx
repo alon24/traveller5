@@ -41,6 +41,8 @@ export default function TrainMap({ route, stations }) {
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    language: 'he',
+    region: 'IL',
     libraries: GOOGLE_MAPS_LIBRARIES,
   });
 

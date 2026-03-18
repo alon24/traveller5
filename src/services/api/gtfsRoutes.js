@@ -49,15 +49,46 @@ async function getZipOffsets() {
   const cdv   = new DataView(cd);
 
   // 6. Parse CD entries → filename → { localOff, compressed }
+  // Supports ZIP64: when standard 32-bit fields are 0xFFFFFFFF,
+  // actual values are stored in the ZIP64 Extra Field (ID 0x0001).
+  const ZIP64_SENTINEL = 0xFFFFFFFF;
   const map = {};
   let p = 0;
   while (p + 46 <= cd.byteLength) {
     if (cdv.getUint32(p, true) !== 0x02014b50) break; // PK\x01\x02
-    const compressed = cdv.getUint32(p + 20, true);
+    let compressed   = cdv.getUint32(p + 20, true);
+    let uncompressed = cdv.getUint32(p + 24, true);
     const fnLen  = cdv.getUint16(p + 28, true);
     const extLen = cdv.getUint16(p + 30, true);
     const cmtLen = cdv.getUint16(p + 32, true);
-    const localOff = cdv.getUint32(p + 42, true);
+    let localOff = cdv.getUint32(p + 42, true);
+
+    // ZIP64: parse extra fields when sentinel values are present
+    if (compressed === ZIP64_SENTINEL || uncompressed === ZIP64_SENTINEL || localOff === ZIP64_SENTINEL) {
+      const extraStart = p + 46 + fnLen;
+      const extraEnd   = extraStart + extLen;
+      let ep = extraStart;
+      while (ep + 4 <= extraEnd) {
+        const hdrId   = cdv.getUint16(ep, true);
+        const hdrSize = cdv.getUint16(ep + 2, true);
+        if (hdrId === 0x0001) { // ZIP64 Extended Information Extra Field
+          let off = ep + 4;
+          // Fields appear only when the corresponding standard field == sentinel
+          if (uncompressed === ZIP64_SENTINEL && off + 8 <= extraEnd) {
+            uncompressed = cdv.getUint32(off, true); off += 8; // low 32 bits sufficient (< 4 GB)
+          }
+          if (compressed === ZIP64_SENTINEL && off + 8 <= extraEnd) {
+            compressed = cdv.getUint32(off, true); off += 8;
+          }
+          if (localOff === ZIP64_SENTINEL && off + 8 <= extraEnd) {
+            localOff = cdv.getUint32(off, true); off += 8;
+          }
+          break;
+        }
+        ep += 4 + hdrSize;
+      }
+    }
+
     const fname = new TextDecoder().decode(new Uint8Array(cd, p + 46, fnLen));
     map[fname] = { localOff, compressed };
     p += 46 + fnLen + extLen + cmtLen;
@@ -101,8 +132,11 @@ async function rangeDecompress(filename) {
   const ds = new DecompressionStream('deflate-raw');
   const writer = ds.writable.getWriter();
   const reader = ds.readable.getReader();
-  writer.write(slice);
-  writer.close();
+  // Suppress write/close promise rejections — "Junk found after end of compressed
+  // data" often surfaces here (data-descriptor entries with trailing bytes).
+  // The same error also surfaces through reader.read() and is caught below.
+  writer.write(slice).catch(() => {});
+  writer.close().catch(() => {});
 
   const chunks = [];
   try {
@@ -112,10 +146,8 @@ async function rangeDecompress(filename) {
       chunks.push(value);
     }
   } catch (e) {
-    // "Junk found after end of compressed data" — the deflate END block was reached
-    // before all bytes were consumed (common with data-descriptor entries).
-    // The chunks collected so far are the complete decompressed output.
-    if (!String(e).includes('unk')) throw e;
+    // Deflate END block reached before all bytes consumed — chunks are complete.
+    if (!String(e).toLowerCase().includes('junk')) throw e;
   }
   const total = chunks.reduce((n, c) => n + c.length, 0);
   const out = new Uint8Array(total);

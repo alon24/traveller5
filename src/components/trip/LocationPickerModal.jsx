@@ -22,6 +22,8 @@ export default function LocationPickerModal({ isOpen, onClose, onConfirm, title 
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    language: 'he',
+    region: 'IL',
     libraries: GOOGLE_MAPS_LIBRARIES,
   });
 

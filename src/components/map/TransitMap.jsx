@@ -57,6 +57,8 @@ export default function TransitMap({ compact = false }) {
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    language: 'he',
+    region: 'IL',
     libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
@@ -116,15 +118,18 @@ export default function TransitMap({ compact = false }) {
             title={`Bus ${bus.vehicleId}`}
             zIndex={80}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-16 -16 32 32"
-              style={{ transform: `rotate(${(bus.bearing ?? 0) - 90}deg)`, display: 'block' }}>
-              <rect x="-9" y="-6" width="18" height="12" rx="3" fill="#1D4ED8" stroke="white" strokeWidth="1.5"/>
-              <polygon points="9,-2 13,0 9,2" fill="white" opacity="0.9"/>
-              <rect x="-6" y="-4" width="5" height="4" rx="1" fill="white" opacity="0.75"/>
-              <rect x="1" y="-4" width="5" height="4" rx="1" fill="white" opacity="0.75"/>
-              <circle cx="-5" cy="6" r="2" fill="#1D4ED8" stroke="white" strokeWidth="1.5"/>
-              <circle cx="5" cy="6" r="2" fill="#1D4ED8" stroke="white" strokeWidth="1.5"/>
-            </svg>
+            <div style={{ transform: `rotate(${bus.bearing ?? 0}deg)`, display: 'inline-block' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-18 -18 36 36">
+                <ellipse cx="0" cy="10" rx="10" ry="3" fill="rgba(0,0,0,0.25)" />
+                <rect x="-11" y="-10" width="22" height="16" rx="4"
+                  fill="#1D4ED8" stroke="white" strokeWidth="2" />
+                <polygon points="11,-3 16,0 11,3" fill="white" opacity="0.95" />
+                <rect x="-8" y="-7" width="6" height="5" rx="1.5" fill="white" opacity="0.85" />
+                <rect x="1" y="-7" width="6" height="5" rx="1.5" fill="white" opacity="0.85" />
+                <circle cx="-6" cy="8" r="2.5" fill="#222" stroke="white" strokeWidth="1.5" />
+                <circle cx="6" cy="8" r="2.5" fill="#222" stroke="white" strokeWidth="1.5" />
+              </svg>
+            </div>
           </AdvancedMarker>
         ))}
       </GoogleMap>
