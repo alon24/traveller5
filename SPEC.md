@@ -160,15 +160,18 @@ A central design challenge is that line "16" is not unique in Israel — it runs
 
 | Format | Example | Source |
 |---|---|---|
-| `gtfs:{routeId}` | `gtfs:12345` | Exact GTFS route_id from MOT |
+| `gtfs:{siriLineRef}` | `gtfs:11230` | Stride SIRI integer line_ref (from `getLineRefsForStopAndLine`) |
+| `gtfs:{motRouteId}` | `gtfs:12345678` | Exact MOT GTFS route_id (from local GTFS catalogue match) |
 | `mot-line:{lineNumber}` | `mot-line:16` | Line number only (ambiguous) |
 | `mot-line:{lineNumber}:{stopCode}` | `mot-line:16:20012` | Line + MOT stop code (city-scoped) |
+
+**Note:** The `gtfs:` prefix is overloaded. `useRouteStops` distinguishes the two `gtfs:` sub-cases: it first tries `getRouteByGtfsId(n)` against the local GTFS catalogue — if found, `n` is a MOT route_id; if not found, `n` is treated as a Stride SIRI line_ref and passed directly to Stride.
 
 **Resolution pipeline** (`useRelIdResolver` hook + `stride.js`):
 
 1. When a user taps a line in the Nearby tab, the stop's MOT code is embedded: `mot-line:16:20012`.
 2. `getSiriLineRef` strips the stop code from the relId using `relId.slice(9).split(':')[0]` to get just the line number, then fetches all GTFS routes for that line number from Stride.
-3. For precise stop-level disambiguation, `getLineRefsForStopAndLine(stopCode, lineNumber)` queries `/gtfs_ride_stops/list` filtered by that specific stop — returning only the line_refs that actually serve that stop on today's schedule.
+3. For precise stop-level disambiguation, `getLineRefsForStopAndLine(stopCode, lineNumber)` queries `/gtfs_ride_stops/list` filtered by that specific stop — returning only the Stride SIRI line_refs that actually serve that stop on today's schedule.
 4. `useRelIdResolver` calls these with rate limiting (semaphore: max 2 concurrent Stride requests) and caches results per `stopCode:lineRef` for the session.
 
 **relId normalisation in caching:** `useRouteStops` and `useRouteShape` both normalise `mot-line:16:stopCode` → `mot-line:16` as the React Query cache key, so that selecting the same line from two different nearby stops reuses the cached route shape.
@@ -235,9 +238,10 @@ Returns `null` (loading), `[]` (failed/no route), or `[{lat, lng}, ...]`.
 
 Returns a `resolveRelId(stopCode, lineRef, lineTo)` function. On call:
 - Acquires semaphore slot (max 2 concurrent).
-- Queries `getLineRefsForStopAndLine` → if found, derives a `gtfs:` relId.
-- Fallback: `searchGtfsRoutes(lineRef, city)` on the GTFS route list.
-- Result cached in module-level map keyed by `stopCode:lineRef`.
+- Primary: calls `getLineRefsForStopAndLine(stopCode, lineRef)` → if a Stride SIRI line_ref is returned, builds `gtfs:{siriLineRef}`.
+- Fallback: scans local GTFS routes by `lineRef` + destination string match → if found, builds `gtfs:{motRouteId}`.
+- Last resort: returns `mot-line:{lineRef}` (ambiguous, no city context).
+- Result cached in component-ref map keyed by `stopCode:lineRef`.
 - Previous in-flight request for the same key is aborted via `AbortController`.
 - **Note:** The resolved relId is intentionally not fed back into `selectedLine` state to avoid re-triggering `useRouteShape` and causing visible flicker. It's used only for arrivals and future reference.
 
@@ -371,7 +375,7 @@ All specs run against `http://localhost:5173` (dev server must be running).
 ## 12. Known Design Decisions and Trade-offs
 
 ### A. relId not updated after resolver fires
-`useRelIdResolver` resolves a more precise `gtfs:` relId asynchronously after the user clicks a line. This resolved value is intentionally **not** written back to `selectedLine` to prevent `useRouteShape` from re-running with a new cache key, which would reset the polyline to null and cause visible flicker. The cost is that the route shape always uses the first matching Stride route for a given line number (not necessarily the exact city variant).
+`useRelIdResolver` resolves a more precise `gtfs:` relId asynchronously after the user clicks a line. This resolved value is intentionally **not** written back to `selectedLine` to prevent `useRouteShape` from re-running with a new cache key, which would reset the polyline to `null` and cause visible flicker. The first render of `useRouteShape` does use the embedded stopCode (`mot-line:16:20012`) for city-precise stop resolution, but its module-level cache normalises the key to `mot-line:16` — so the *second* user to select line 16 from a different stop in the same session gets the cached shape from the first selection, not a newly-resolved city-specific one.
 
 ### B. No route stops from GTFS static
 `useRouteStops` uses Stride (online) rather than the local GTFS stop_times file. This keeps the ZIP download small (only `routes.txt` and `stops.txt` are fetched), but means route stop data requires a network call per line.
@@ -383,7 +387,7 @@ The `useVehiclePositions()` hook (GTFS-RT from MOT) is still in the codebase but
 `useNearbyStops` queries Overpass for nodes only, not full route relations. This is much faster (seconds vs. 30+ seconds for relation walks) but means line colour/destination data comes from OSM node tags, which may be less complete than the MOT GTFS data. The GTFS merge step compensates by overwriting colour with the MOT GTFS value when a code match is found.
 
 ### E. Polyline uses DRIVING fallback
-Google Maps TRANSIT directions often fail for short-distance or non-rail routes in Israel. The fallback to DRIVING mode with all stops as waypoints ensures every selected line gets a road-following polyline, at the cost of using DRIVING routing which may diverge from the actual bus path in some cases.
+Google Maps TRANSIT directions often fail for short-distance or non-rail routes in Israel. When intermediate stops are available, `useRouteShape` goes directly to DRIVING mode (skipping TRANSIT) with up to 23 subsampled waypoints, ensuring every selected line gets a road-following polyline. The cost is that DRIVING routing may diverge from the actual bus path where the bus takes bus-only lanes or shortcuts.
 
 ### F. `isFavorite` is O(n)
 The favorites store scans the full array on each render for each line row. For typical usage (< 50 favorites) this is fine, but would degrade with a large favorites list.
@@ -501,33 +505,36 @@ useNearbyStops(lat, lng)
         stopId: "..."
       }
               │
-      ┌───────┴────────────┐
-      │                    │
-      ▼                    ▼
-useRouteStops          useSiriVehiclePositions
-("mot-line:16")        ("mot-line:16:20012")
-      │                    │
-  Stride API           getSiriLineRef(relId)
-  3-step flow:           strips stopCode → "16"
-  /gtfs_routes →         /gtfs_routes?route_short_name=16
-  /gtfs_rides →          returns [lineRef1, lineRef2, ...]
-  /gtfs_ride_stops            │
-      │                  fetchSiriVehicleLocations([lr1, lr2])
-      │                  /siri_vehicle_locations/list
-      ▼                  10-min window, dedup by vehicle_ref
-  routeStops[]               │
-      │                  busPositions[]
-      ▼                      │
-useRouteShape ◄──────────────┘
-  terminals → DirectionsService (TRANSIT → DRIVING fallback)
-  → polyline [{lat,lng}]
-              │
-              ▼
-        NearbyMap renders:
-          • Polyline (single instance, path updated)
-          • Stop markers for routeStops[]
-          • AdvancedMarkers for busPositions[]
-            (SVG bus icon, rotated by bearing)
+      ┌───────────┬────────────────────┐
+      │           │                    │
+      ▼           ▼                    ▼
+useRouteStops  useRouteShape      useSiriVehiclePositions
+("mot-line:16:20012")             ("mot-line:16:20012")
+      │        (independent stop        │
+      │         resolution via          │
+      │         getStopsForShape)    getSiriLineRef(relId)
+      │           │                   strips stopCode → "16"
+      │           │                   /gtfs_routes?route_short_name=16
+      │           │                   returns [lineRef1, lineRef2, ...]
+      │           │                         │
+      ▼           │                   fetchSiriVehicleLocations([lr1, lr2])
+  routeStops[]   │                   /siri_vehicle_locations/list
+   (for markers) │                   10-min window, dedup by vehicle_ref
+                 │                         │
+                 ▼                   busPositions[]
+           polyline [{lat,lng}]            │
+           (waypoints >0 → DRIVING         │
+            directly; terminals            │
+            only → TRANSIT first,          │
+            then DRIVING fallback)         │
+                 │                         │
+                 └───────────┬─────────────┘
+                             ▼
+                       NearbyMap renders:
+                         • Polyline (single instance, path updated)
+                         • Stop markers for routeStops[]
+                         • AdvancedMarkers for busPositions[]
+                           (SVG bus icon, rotated by bearing)
 ```
 
 ### Trip Planning Flow
