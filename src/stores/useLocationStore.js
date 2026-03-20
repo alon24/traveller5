@@ -22,14 +22,33 @@ export const useLocationStore = create((set, get) => {
     watchId: null,
     usingFallback: true,
     fallbackLocation,
+    isManual: false,
+    manualLabel: null,
 
     setFallbackLocation: (loc) => {
       localStorage.setItem(FALLBACK_KEY, JSON.stringify(loc));
-      const { usingFallback } = get();
+      const { usingFallback, isManual } = get();
       set({
         fallbackLocation: loc,
-        ...(usingFallback ? { coords: loc } : {}),
+        ...((usingFallback && !isManual) ? { coords: loc } : {}),
       });
+    },
+
+    setManualLocation: (cols) => {
+      const { stopWatch } = get();
+      stopWatch();
+      set({
+        coords: cols.coords,
+        manualLabel: cols.label,
+        isManual: true,
+        usingFallback: false,
+      });
+    },
+
+    resetToGPS: () => {
+      set({ isManual: false });
+      const { startWatch } = get();
+      startWatch();
     },
 
     startWatch: () => {

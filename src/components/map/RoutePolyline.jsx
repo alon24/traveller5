@@ -11,8 +11,8 @@ export default function RoutePolyline({ route }) {
       path={path}
       options={{
         strokeColor: '#3B82F6',
-        strokeOpacity: 0.9,
-        strokeWeight: 4,
+        strokeOpacity: 1.0,
+        strokeWeight: 5,
         zIndex: 10,
       }}
     />

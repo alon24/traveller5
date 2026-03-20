@@ -4,7 +4,7 @@ import { findTerminalStops, getRouteByGtfsId, findBestTerminalsByRef } from '../
 import { getLineStopsFromStride } from '../services/api/stride';
 
 // ── Overpass stops (OSM relation ID, numeric string) ──────────────
-async function fetchOverpassStops(relId) {
+async function fetchOverpassStops(relId, signal) {
   const query = `
     [out:json][timeout:30];
     rel(${relId})->.route;
@@ -12,7 +12,7 @@ async function fetchOverpassStops(relId) {
     node(r.route);
     out body qt;
   `;
-  const data = await overpassQuery(query);
+  const data = await overpassQuery(query, signal);
 
   const rel = data.elements.find((e) => e.type === 'relation');
   if (!rel) return [];
@@ -43,25 +43,25 @@ async function fetchOverpassStops(relId) {
     .filter(Boolean);
 }
 
-async function fetchGtfsTerminals(routeId) {
-  const route = await getRouteByGtfsId(routeId);
+async function fetchGtfsTerminals(routeId, signal) {
+  const route = await getRouteByGtfsId(routeId, signal);
   if (route?.ref) {
     try {
-      const stops = await getLineStopsFromStride(route.ref, routeId);
+      const stops = await getLineStopsFromStride(route.ref, routeId, signal);
       if (stops) return stops;
     } catch {}
-    return findTerminalStops(route.from, route.to);
+    return findTerminalStops(route.from, route.to, signal);
   }
   // routeId is a SIRI line_ref (integer) — getRouteByGtfsId won't find it in
   // the local GTFS ZIP. Fall back to Stride which accepts line_refs directly.
   try {
-    const stops = await getLineStopsFromStride(null, routeId);
+    const stops = await getLineStopsFromStride(null, routeId, signal);
     if (stops) return stops;
   } catch {}
   return [];
 }
 
-async function fetchMotLineTerminals(lineRefAndStop) {
+async function fetchMotLineTerminals(lineRefAndStop, signal) {
   // relId format: "16" or "16:stopCode" (stop code appended for city precision)
   const colonIdx = lineRefAndStop.indexOf(':');
   const lineRef  = colonIdx === -1 ? lineRefAndStop : lineRefAndStop.slice(0, colonIdx);
@@ -69,28 +69,28 @@ async function fetchMotLineTerminals(lineRefAndStop) {
 
   // Stop-correlated lookup: resolves the exact SIRI line_ref serving this stop,
   // avoiding city collisions (e.g. line 16 in Jerusalem vs Haifa).
-  if (stopCode) {
+    if (stopCode) {
+      try {
+        const { getLineRefsForStopAndLine } = await import('../services/api/stride');
+        const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef, signal);
+        if (lineRefs?.length) {
+          const stops = await getLineStopsFromStride(null, lineRefs[0], signal);
+          if (stops) return stops;
+        }
+      } catch {}
+    }
+  
     try {
-      const { getLineRefsForStopAndLine } = await import('../services/api/stride');
-      const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef);
-      if (lineRefs?.length) {
-        const stops = await getLineStopsFromStride(null, lineRefs[0]);
-        if (stops) return stops;
-      }
+      const stops = await getLineStopsFromStride(lineRef, null, signal);
+      if (stops) return stops;
     } catch {}
-  }
-
-  try {
-    const stops = await getLineStopsFromStride(lineRef);
-    if (stops) return stops;
-  } catch {}
-  return findBestTerminalsByRef(lineRef);
+    return findBestTerminalsByRef(lineRef, signal);
 }
 
-function fetchRouteStops(relId) {
-  if (relId.startsWith('gtfs:'))     return fetchGtfsTerminals(relId.slice(5));
-  if (relId.startsWith('mot-line:')) return fetchMotLineTerminals(relId.slice(9));
-  return fetchOverpassStops(relId);
+function fetchRouteStops(relId, signal) {
+  if (relId.startsWith('gtfs:'))     return fetchGtfsTerminals(relId.slice(5), signal);
+  if (relId.startsWith('mot-line:')) return fetchMotLineTerminals(relId.slice(9), signal);
+  return fetchOverpassStops(relId, signal);
 }
 
 // Normalize the cache key for mot-line: relIds so that the same line number
@@ -108,7 +108,7 @@ export function useRouteStops(relId) {
   const cacheKey = normalizeRelIdKey(relId);
   return useQuery({
     queryKey: ['route-stops', cacheKey],
-    queryFn: () => fetchRouteStops(relId),
+    queryFn: ({ signal }) => fetchRouteStops(relId, signal),
     enabled: !!relId,
     staleTime: 60 * 60 * 1000, // route stops change ≤ once a day
     gcTime:    90 * 60 * 1000,

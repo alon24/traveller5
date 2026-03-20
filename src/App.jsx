@@ -14,7 +14,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 export default function App() {
   return (
-    <Suspense fallback={<LoadingSpinner size="lg" className="min-h-screen bg-gray-950" />}>
+    <Suspense fallback={<LoadingSpinner size="lg" className="min-h-screen bg-white" />}>
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<HomePage />} />

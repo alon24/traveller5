@@ -12,13 +12,18 @@ const REQUEST_TIMEOUT_MS = 12_000; // 12 s per mirror
  * Returns the first successful JSON response.
  * This avoids the 30+ second wait when one mirror is slow.
  */
-export async function overpassQuery(query) {
+export async function overpassQuery(query, signal) {
   const body    = `data=${encodeURIComponent(query)}`;
   const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
   const attempt = (url) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    
+    if (signal) {
+      signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    }
+
     return fetch(url, { method: 'POST', headers, body, signal: ctrl.signal })
       .then(async (res) => {
         clearTimeout(timer);

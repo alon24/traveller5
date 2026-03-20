@@ -7,7 +7,8 @@ A real-time public transit trip planner for Israel, built as a Progressive Web A
 - **Trip Planning** — Point A → Point B routing via Google Directions (transit mode, buses + trains)
 - **Live Bus Tracking** — Real-time bus locations from Israel MOT GTFS-RT feeds, shown as clickable icons on the map
 - **Train Schedule** — Departure board for any Israel Railways station pair
-- **Nearby Stops** — Find bus stops near you (both directions) with live lines at each stop
+- **Nearby Stops** — Find bus stops near you with real-time arrivals (via CurlBus proxy) and live vehicle tracking.
+- **Manual Location Selection** — Overwrite your GPS position directly from the map to plan trips from anywhere in Israel.
 - **Weather** — Current conditions + hourly forecast with rain/extreme weather alerts
 - **Departure Alerts** — Push notification when it's time to leave for your trip
 - **Responsive** — Mobile-first design with bottom tab nav; desktop sidebar layout
@@ -99,7 +100,7 @@ App start → fetch ZIP from proxy → Web Worker decompresses + parses CSV
 
 ### Real-Time Polling
 
-React Query polls GTFS-RT feeds every 15 seconds. All components sharing the same query key get the same cached data — only one network request is made per interval.
+React Query polls GTFS-RT and SIRI (Stride) feeds every 15–30 seconds. Specific error handling is in place for "Invalid stop code" responses, ensuring the UI degrades gracefully to "Real-time currently unavailable" for stops not yet covered by the live proxy.
 
 ## Known Limitations
 

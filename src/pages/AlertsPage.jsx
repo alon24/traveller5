@@ -10,14 +10,14 @@ export default function AlertsPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-xl font-bold text-white">Departure Alerts</h1>
+      <h1 className="text-xl font-bold text-gray-900">Departure Alerts</h1>
 
       {permission !== 'granted' && (
         <div className="bg-yellow-900/40 border border-yellow-700 rounded-xl p-4">
           <p className="text-yellow-300 text-sm mb-2">Enable notifications to receive departure alerts.</p>
           <button
             onClick={requestPermission}
-            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm text-white transition-colors"
+            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm text-gray-900 transition-colors"
           >
             Enable Notifications
           </button>

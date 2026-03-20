@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo } from 'react';
+import { useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api';
 import { Crosshair } from 'lucide-react';
 import AdvancedMarker from './AdvancedMarker';
@@ -7,6 +7,7 @@ import { useLocationStore } from '../../stores/useLocationStore';
 import { useTripStore } from '../../stores/useTripStore';
 import { useNearbyStops } from '../../hooks/useNearbyStops';
 import { useVehiclePositions } from '../../hooks/useGtfsRealtime';
+import { getGtfsRoutes } from '../../services/api/gtfsRoutes';
 import UserMarker from './UserMarker';
 import RoutePolyline from './RoutePolyline';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -41,6 +42,15 @@ export default function TransitMap({ compact = false }) {
   const selectedRouteIndex = useTripStore((s) => s.selectedRouteIndex);
   const mapRef = useRef(null);
 
+  const [routeIdMap, setRouteIdMap] = useState({});
+  useEffect(() => {
+    getGtfsRoutes().then(allRoutes => {
+      const map = {};
+      allRoutes.forEach(r => { map[r.routeId] = r.ref; });
+      setRouteIdMap(map);
+    }).catch(() => {});
+  }, []);
+
   const { data: stops = [] } = useNearbyStops(
     compact ? null : coords?.lat,
     compact ? null : coords?.lng,
@@ -55,11 +65,12 @@ export default function TransitMap({ compact = false }) {
     );
   }, [allVehicles, coords, compact]);
 
+  const [libraries] = useState(GOOGLE_MAPS_LIBRARIES);
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
     language: 'he',
     region: 'IL',
-    libraries: GOOGLE_MAPS_LIBRARIES,
+    libraries,
   });
 
   const onLoad = useCallback((map) => { mapRef.current = map; }, []);
@@ -72,12 +83,12 @@ export default function TransitMap({ compact = false }) {
   };
 
   if (loadError) return (
-    <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
+    <div className="flex items-center justify-center h-full bg-gray-50 text-gray-600">
       Map failed to load. Check your API key.
     </div>
   );
 
-  if (!isLoaded) return <LoadingSpinner size="lg" className="h-full bg-gray-900" />;
+  if (!isLoaded) return <LoadingSpinner size="lg" className="h-full bg-gray-50" />;
 
   const selectedRoute = routes[selectedRouteIndex];
 
@@ -111,34 +122,62 @@ export default function TransitMap({ compact = false }) {
         ))}
 
         {/* Live bus positions */}
-        {nearbyBuses.map((bus) => (
-          <AdvancedMarker
-            key={bus.vehicleId}
-            position={{ lat: bus.lat, lng: bus.lng }}
-            title={`Bus ${bus.vehicleId}`}
-            zIndex={80}
-          >
-            <div style={{ transform: `rotate(${bus.bearing ?? 0}deg)`, display: 'inline-block' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="-18 -18 36 36">
-                <ellipse cx="0" cy="10" rx="10" ry="3" fill="rgba(0,0,0,0.25)" />
-                <rect x="-11" y="-10" width="22" height="16" rx="4"
-                  fill="#1D4ED8" stroke="white" strokeWidth="2" />
-                <polygon points="11,-3 16,0 11,3" fill="white" opacity="0.95" />
-                <rect x="-8" y="-7" width="6" height="5" rx="1.5" fill="white" opacity="0.85" />
-                <rect x="1" y="-7" width="6" height="5" rx="1.5" fill="white" opacity="0.85" />
-                <circle cx="-6" cy="8" r="2.5" fill="#222" stroke="white" strokeWidth="1.5" />
-                <circle cx="6" cy="8" r="2.5" fill="#222" stroke="white" strokeWidth="1.5" />
-              </svg>
-            </div>
-          </AdvancedMarker>
-        ))}
+        {nearbyBuses.map((bus) => {
+          const lineRef = routeIdMap[bus.routeId];
+          return (
+            <AdvancedMarker
+              key={bus.vehicleId}
+              position={{ lat: bus.lat, lng: bus.lng }}
+              title={lineRef ? `Line ${lineRef} (Bus ${bus.vehicleId})` : `Bus ${bus.vehicleId}`}
+              zIndex={80}
+            >
+              <div 
+                className="relative flex items-center justify-center z-[80] drop-shadow-md"
+                style={{ width: 42, height: 28, cursor: 'pointer' }}
+              >
+                {/* Bus Skeleton Icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="24" viewBox="0 0 24 24" className="overflow-visible">
+                  <g stroke="white" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+                  </g>
+                  <g stroke="#3B82F6" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+                  </g>
+                </svg>
+
+                {/* Line Number Badge */}
+                {lineRef && (
+                  <div 
+                    className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm border border-white"
+                    style={{ backgroundColor: '#3B82F6' }}
+                  >
+                    {lineRef}
+                  </div>
+                )}
+
+                {/* Live Pulsating Indicator */}
+                <div className="absolute top-0.5 left-0.5 flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                  <div className="absolute w-2.5 h-2.5 rounded-full bg-red-500 opacity-40 animate-ping" />
+                </div>
+
+                <div 
+                  className="absolute inset-x-0 bottom-0 top-0 pointer-events-none"
+                  style={{ transform: `rotate(${bus.bearing ?? 0}deg)` }}
+                >
+                  <div className="absolute -top-[6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[6px] border-b-gray-700 drop-shadow-sm" />
+                </div>
+              </div>
+            </AdvancedMarker>
+          );
+        })}
       </GoogleMap>
 
       {!compact && (
         <button
           onClick={locateMe}
           title="Go to my location"
-          className="absolute bottom-24 right-3 z-10 bg-gray-900 hover:bg-gray-800 border border-gray-700 text-white p-2.5 rounded-full shadow-lg transition-colors"
+          className="absolute bottom-24 right-3 z-10 bg-gray-50 hover:bg-gray-100 border border-gray-300 text-gray-900 p-2.5 rounded-full shadow-lg transition-colors"
         >
           <Crosshair size={18} />
         </button>

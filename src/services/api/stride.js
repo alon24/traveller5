@@ -36,12 +36,29 @@ export async function getLineRefsForStopAndLine(stopCode, lineNumber, signal) {
     const dayEnd   = new Date(today); dayEnd.setUTCHours(23, 59, 59, 0);
     const from = dayStart.toISOString().replace('Z', '+00:00');
     const to   = dayEnd.toISOString().replace('Z', '+00:00');
-    const res = await fetch(
+    let res = await fetch(
       `${BASE}/gtfs_ride_stops/list?gtfs_stop__code=${encodeURIComponent(stopCode)}&gtfs_route__route_short_name=${encodeURIComponent(lineNumber)}&arrival_time_from=${encodeURIComponent(from)}&arrival_time_to=${encodeURIComponent(to)}&limit=20`,
       { signal },
     );
     if (!res.ok) { _stopLineCache.set(key, null); return null; }
-    const items = await res.json();
+    let items = await res.json();
+
+    // Fallback: If no rides today, check tomorrow (00:00 - 23:59)
+    if (!items?.length) {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tStart = new Date(tomorrow); tStart.setUTCHours(0, 0, 0, 0);
+      const tEnd   = new Date(tomorrow); tEnd.setUTCHours(23, 59, 59, 0);
+      const tFrom = tStart.toISOString().replace('Z', '+00:00');
+      const tTo   = tEnd.toISOString().replace('Z', '+00:00');
+
+      res = await fetch(
+        `${BASE}/gtfs_ride_stops/list?gtfs_stop__code=${encodeURIComponent(stopCode)}&gtfs_route__route_short_name=${encodeURIComponent(lineNumber)}&arrival_time_from=${encodeURIComponent(tFrom)}&arrival_time_to=${encodeURIComponent(tTo)}&limit=20`,
+        { signal },
+      );
+      if (res.ok) items = await res.json();
+    }
+
     if (!items?.length) { _stopLineCache.set(key, null); return null; }
 
     const lineRefs = [...new Set(items.map(i => i.gtfs_route__line_ref).filter(x => x != null))];
@@ -59,7 +76,7 @@ export async function getLineRefsForStopAndLine(stopCode, lineNumber, signal) {
  * for querying siri_vehicle_locations without an API key.
  * Returns null if the line cannot be resolved.
  */
-export async function getSiriLineRef(relId) {
+export async function getSiriLineRef(relId, signal) {
   if (!relId) return null;
   if (_siriLineRefCache.has(relId)) return _siriLineRefCache.get(relId);
 
@@ -75,10 +92,24 @@ export async function getSiriLineRef(relId) {
   // For mot-line: look up ALL line_refs for this route_short_name (multiple operators possible)
   // relId may be "mot-line:16" or "mot-line:16:STOPCODE" — extract just the line number
   if (relId.startsWith('mot-line:')) {
-    const lineNumber = relId.slice(9).split(':')[0];
+    const parts = relId.slice(9).split(':');
+    const lineNumber = parts[0];
+    const stopCode = parts[1];
+
+    // If stopCode is present, use it for pinpoint disambiguation
+    if (stopCode) {
+      const bestRefs = await getLineRefsForStopAndLine(stopCode, lineNumber, signal);
+      if (bestRefs) {
+        _siriLineRefCache.set(relId, bestRefs);
+        return bestRefs;
+      }
+    }
+
+    // Fallback: look up all line_refs for this route_short_name (can lead to cross-city "leftovers")
     const today = new Date().toISOString().slice(0, 10);
     const routesRes = await fetch(
       `${BASE}/gtfs_routes/list?route_short_name=${encodeURIComponent(lineNumber)}&date_from=${today}&limit=30`,
+      { signal }
     );
     if (!routesRes.ok) return null;
     const routes = await routesRes.json();
@@ -97,7 +128,7 @@ export async function getSiriLineRef(relId) {
  * Uses a 10-minute window to account for Stride ingestion delay (~2 min).
  * Deduplicates by vehicle_ref, keeping the most recent position per bus.
  */
-export async function fetchSiriVehicleLocations(siriLineRefs) {
+export async function fetchSiriVehicleLocations(siriLineRefs, signal) {
   const refs = Array.isArray(siriLineRefs) ? siriLineRefs : [siriLineRefs];
   if (!refs.length) return [];
 
@@ -107,7 +138,7 @@ export async function fetchSiriVehicleLocations(siriLineRefs) {
 
   // Fetch all line_refs in parallel
   const results = await Promise.all(refs.map(ref =>
-    fetch(`${BASE}/siri_vehicle_locations/list?siri_routes__line_ref=${ref}&recorded_at_time_from=${from}&recorded_at_time_to=${to}&limit=100`)
+    fetch(`${BASE}/siri_vehicle_locations/list?siri_routes__line_ref=${ref}&recorded_at_time_from=${from}&recorded_at_time_to=${to}&limit=100`, { signal })
       .then(r => r.ok ? r.json() : [])
       .catch(() => [])
   ));
@@ -136,7 +167,7 @@ export async function fetchSiriVehicleLocations(siriLineRefs) {
 export function getLineStopsFromStride(lineRef, gtfsRouteId = null) {
   const cacheKey = gtfsRouteId ? `route:${gtfsRouteId}` : `line:${lineRef}`;
   if (_cache.has(cacheKey)) return _cache.get(cacheKey);
-  // Store the promise immediately so concurrent callers share one in-flight request
+  // Shared fetcher - should NOT be tied to a single request's signal
   const promise = _fetchLineStops(lineRef, gtfsRouteId, cacheKey);
   _cache.set(cacheKey, promise);
   return promise;
@@ -154,7 +185,7 @@ async function _fetchLineStops(lineRef, gtfsRouteId, cacheKey) {
     routesRes = await fetch(`${BASE}/gtfs_routes/list?line_refs=${encodeURIComponent(gtfsRouteId)}&limit=1`);
   } else {
     routesRes = await fetch(
-      `${BASE}/gtfs_routes/list?route_short_name=${encodeURIComponent(lineRef)}&date_from=${today}&limit=5`,
+      `${BASE}/gtfs_routes/list?route_short_name=${encodeURIComponent(lineRef)}&date_from=${today}&limit=5`
     );
   }
   if (!routesRes.ok) throw new Error(`Stride routes ${routesRes.status}`);
@@ -163,15 +194,25 @@ async function _fetchLineStops(lineRef, gtfsRouteId, cacheKey) {
 
   // Step 2: find a representative ride (trip) for this route
   const routeId = routes[0].id;
-  const ridesRes = await fetch(`${BASE}/gtfs_rides/list?gtfs_route_id=${routeId}&limit=2`);
+  let ridesRes = await fetch(`${BASE}/gtfs_rides/list?gtfs_route_id=${routeId}&limit=2`);
   if (!ridesRes.ok) throw new Error(`Stride rides ${ridesRes.status}`);
-  const rides = await ridesRes.json();
+  let rides = await ridesRes.json();
+
+  // Fallback: If no rides today, try a broader window (last 3 days to next 3 days)
+  // to find any representative trip that defined the route's stop sequence.
+  if (!rides.length) {
+    const dFrom = new Date(new Date() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dTo   = new Date(new Date().getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    ridesRes = await fetch(`${BASE}/gtfs_rides/list?gtfs_route_id=${routeId}&start_date_from=${dFrom}&start_date_to=${dTo}&limit=2`);
+    if (ridesRes.ok) rides = await ridesRes.json();
+  }
+
   if (!rides.length) return null;
 
   // Step 3: fetch all stops for this ride, ordered by stop_sequence
   const rideId = rides[0].id;
   const stopsRes = await fetch(
-    `${BASE}/gtfs_ride_stops/list?gtfs_ride_ids=${rideId}&limit=200`,
+    `${BASE}/gtfs_ride_stops/list?gtfs_ride_ids=${rideId}&limit=200`
   );
   if (!stopsRes.ok) throw new Error(`Stride ride stops ${stopsRes.status}`);
   const items = await stopsRes.json();
@@ -187,4 +228,40 @@ async function _fetchLineStops(lineRef, gtfsRouteId, cacheKey) {
     }));
 
   return stops.length >= 2 ? stops : null;
+}
+
+/**
+ * Fetches static schedule arrivals for a stop for tomorrow morning.
+ * Useful as a fallback when real-time results are empty at night.
+ */
+export async function getScheduledArrivals(stopCode, signal) {
+  if (!stopCode) return [];
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  // 00:00 - 12:00 tomorrow
+  const dayStart = new Date(tomorrow); dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd   = new Date(tomorrow); dayEnd.setUTCHours(12, 0, 0, 0);
+  const from = dayStart.toISOString().replace('Z', '+00:00');
+  const to   = dayEnd.toISOString().replace('Z', '+00:00');
+
+  try {
+    const res = await fetch(
+      `${BASE}/gtfs_ride_stops/list?gtfs_stop__code=${encodeURIComponent(stopCode)}&arrival_time_from=${encodeURIComponent(from)}&arrival_time_to=${encodeURIComponent(to)}&limit=100`,
+      { signal }
+    );
+    if (!res.ok) return [];
+    const items = await res.json();
+    return items.map(i => ({
+      lineRef:     i.gtfs_route__route_short_name || '',
+      destination: i.gtfs_route__route_long_name?.split?.('<->')?.[1] || '',
+      operator:    '',
+      eta:         i.arrival_time, // ISO string
+      scheduled:   true,
+    }));
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    return [];
+  }
 }

@@ -106,12 +106,12 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-      <h1 className="text-white text-xl font-bold">Settings</h1>
+      <h1 className="text-gray-900 text-xl font-bold">Settings</h1>
 
       {/* GPS status */}
-      <div className="bg-gray-800 rounded-xl p-4">
-        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Location Source</p>
-        <div className="flex items-center gap-2">
+      <div className="bg-gray-100 rounded-xl p-4">
+        <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">Location Source</p>
+        <div className="flex items-center gap-1.5">
           <Navigation size={16} className={usingFallback ? 'text-yellow-400' : 'text-green-400'} />
           <span className="text-sm text-gray-200">
             {usingFallback ? 'Using fallback location' : 'Using GPS'}
@@ -120,11 +120,11 @@ export default function SettingsPage() {
       </div>
 
       {/* Fallback location */}
-      <div className="bg-gray-800 rounded-xl p-4 space-y-4">
+      <div className="bg-gray-100 rounded-xl p-4 space-y-4">
         {/* Current */}
         <div>
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Fallback Location</p>
-          <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">Fallback Location</p>
+          <div className="flex items-center gap-1.5">
             <MapPin size={15} className="text-blue-400 shrink-0" />
             <span className="text-sm text-gray-200 flex-1 leading-snug">{fallbackLocation.name}</span>
             {saved && (
@@ -140,12 +140,12 @@ export default function SettingsPage() {
 
         {/* Search */}
         <div className="relative">
-          <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Change Location</p>
+          <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">Change Location</p>
 
-          <div className="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500">
+          <div className="flex items-center gap-1.5 bg-gray-200 rounded-lg px-2.5 py-2 focus-within:ring-2 focus-within:ring-blue-500">
             {!isLoaded
-              ? <Loader size={14} className="text-gray-400 shrink-0 animate-spin" />
-              : <MapPin size={14} className="text-gray-400 shrink-0" />
+              ? <Loader size={14} className="text-gray-600 shrink-0 animate-spin" />
+              : <MapPin size={14} className="text-gray-600 shrink-0" />
             }
             <input
               ref={inputRef}
@@ -156,26 +156,26 @@ export default function SettingsPage() {
               placeholder={isLoaded ? 'Search in Hebrew or English…' : 'Loading maps…'}
               disabled={!isLoaded}
               dir="auto"
-              className="flex-1 bg-transparent text-white text-sm outline-none placeholder-gray-500 disabled:opacity-40"
+              className="flex-1 bg-transparent text-gray-900 text-sm outline-none placeholder-gray-500 disabled:opacity-40"
             />
             {query && (
-              <button onClick={clearInput} className="text-gray-500 hover:text-gray-300">
+              <button onClick={clearInput} className="text-gray-500 hover:text-gray-700">
                 <X size={14} />
               </button>
             )}
           </div>
 
           {open && suggestions.length > 0 && (
-            <ul className="absolute top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-2xl z-50 max-h-72 overflow-y-auto">
+            <ul className="absolute top-full left-0 right-0 mt-1 bg-gray-50 border border-gray-300 rounded-xl overflow-hidden shadow-2xl z-50 max-h-72 overflow-y-auto">
               {suggestions.map((s) => (
                 <li key={s.place_id}>
                   <button
                     onMouseDown={() => handleSelect(s)}
-                    className="w-full text-left flex items-start gap-2.5 px-4 py-3 hover:bg-gray-800 transition-colors border-b border-gray-800/50 last:border-0"
+                    className="w-full text-left flex items-start gap-1.5.5 px-4 py-2 hover:bg-gray-100 transition-colors border-b border-gray-200/50 last:border-0"
                   >
                     <MapPin size={13} className="text-gray-500 shrink-0 mt-0.5" />
                     <div className="min-w-0">
-                      <p className="text-sm text-white" dir="auto">
+                      <p className="text-sm text-gray-900" dir="auto">
                         {s.structured_formatting.main_text}
                       </p>
                       {s.structured_formatting.secondary_text && (

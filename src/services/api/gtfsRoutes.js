@@ -100,7 +100,7 @@ async function getZipOffsets() {
 
 // ── Decompressor ─────────────────────────────────────────────────────────────
 
-async function rangeDecompress(filename) {
+async function rangeDecompress(filename, signal) {
   const offsets = await getZipOffsets();
   const entry = offsets[filename];
   if (!entry) throw new Error(`${filename} not found in GTFS ZIP`);
@@ -111,6 +111,7 @@ async function rangeDecompress(filename) {
   // 512 bytes is a safe upper bound for header overhead (30 fixed + filename + extra fields).
   const res = await fetch(ZIP, {
     headers: { Range: `bytes=${localOff}-${localOff + 512 + compressed - 1}` },
+    signal
   });
   if (res.status !== 206)
     throw new Error(`GTFS range fetch failed: ${res.status}`);
@@ -216,7 +217,7 @@ function parseFromTo(longName) {
   const sep = longName.indexOf('<->');
   if (sep === -1) return { from: '', to: longName };
   const from = longName.slice(0, sep).trim();
-  const to = longName.slice(sep + 3).replace(/-\d+[#\d]?$/, '').trim();
+  const to = longName.slice(sep + 3).replace(/-\d+[א-ת#]?$/, '').trim();
   return { from, to };
 }
 
@@ -258,17 +259,45 @@ export function getGtfsRoutes() {
   return _routesCache;
 }
 
+function extractCityFromDesc(desc) {
+  if (!desc) return null;
+  const parts = desc.split('עיר:');
+  if (parts.length < 2) return null;
+  const afterCity = parts[1].trim();
+  const city = afterCity.split(/ רציף:| קומה:| רחוב:/)[0].trim();
+  return city || null;
+}
+
 // ── Stops loader ─────────────────────────────────────────────────────────────
+
+export function extractCity(name) {
+  if (!name) return '';
+  // Match text inside parentheses: "Stop Name (City)"
+  const m = name.match(/\(([^)]+)\)/);
+  if (m) return m[1].trim();
+  // Fallback: text after a slash or dash if it looks like a city
+  const parts = name.split(/[/-]/);
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1].trim();
+    if (last.length >= 3 && last.length <= 15) return last;
+  }
+  return '';
+}
 
 async function loadGtfsStops() {
   const stopsText = await rangeDecompress('stops.txt');
-  return parseCsv(stopsText).map(s => ({
-    stopId:   s.stop_id,
-    stopCode: s.stop_code,
-    name:     s.stop_name,
-    lat:      parseFloat(s.stop_lat),
-    lng:      parseFloat(s.stop_lon),
-  }));
+  return parseCsv(stopsText).map(s => {
+    const name = s.stop_name || '';
+    const desc = s.stop_desc || '';
+    return {
+      stopId:   s.stop_id,
+      stopCode: s.stop_code,
+      name,
+      city:     extractCity(name) || extractCityFromDesc(desc) || '',
+      lat:      parseFloat(s.stop_lat),
+      lng:      parseFloat(s.stop_lon),
+    };
+  });
 }
 
 export function getGtfsStops() {
@@ -278,10 +307,15 @@ export function getGtfsStops() {
 
 // ── Fuzzy stop matching ───────────────────────────────────────────────────────
 
-function normalizeName(name) {
+export function normalizeName(name) {
+  if (!name) return '';
   return name
     .replace(/['']/g, '"')
-    .replace(/\s*-[^-/]+$/, '')
+    .replace(/\s*-[^-/]+$/, '') // Remove secondary descriptors
+    .replace(/\bת\.\s*רכבת\b/g, 'תחנת רכבת') // Standardize station abbreviations
+    .replace(/\bת\.?\s*מרכזית\b/g, 'תחנה מרכזית')
+    .replace(/[."']/g, '') // Remove punctuation that causes mismatches
+    .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
@@ -309,7 +343,7 @@ function bestMatch(stops, searchName) {
   return best || null;
 }
 
-export async function findTerminalStops(fromName, toName) {
+export async function findTerminalStops(fromName, toName, signal) {
   const stops = await getGtfsStops();
   const fromStop = bestMatch(stops, fromName);
   const toStop   = bestMatch(stops, toName);
@@ -321,12 +355,12 @@ export async function findTerminalStops(fromName, toName) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function getRouteByGtfsId(routeId) {
+export async function getRouteByGtfsId(routeId, signal) {
   const routes = await getGtfsRoutes();
   return routes.find(r => r.routeId === routeId) || null;
 }
 
-export async function getFirstRouteByRef(lineRef) {
+export async function getFirstRouteByRef(lineRef, signal) {
   const routes = await getGtfsRoutes();
   return routes.find(r => r.ref === lineRef) || null;
 }
@@ -337,17 +371,17 @@ export async function getFirstRouteByRef(lineRef) {
  * numbers are reused across cities/operators, and the first match is often
  * the wrong city.
  */
-export async function findBestTerminalsByRef(lineRef) {
+export async function findBestTerminalsByRef(lineRef, signal) {
   const routes = await getGtfsRoutes();
   const candidates = routes.filter(r => r.ref === lineRef);
   for (const route of candidates) {
-    const stops = await findTerminalStops(route.from, route.to);
+    const stops = await findTerminalStops(route.from, route.to, signal);
     if (stops.length >= 2) return stops;
   }
   return [];
 }
 
-export async function searchGtfsRoutes(lineRef, city) {
+export async function searchGtfsRoutes(lineRef, city, signal) {
   const routes = await getGtfsRoutes();
   const ref = lineRef.trim();
   const cityLower = city?.trim().toLowerCase() || '';

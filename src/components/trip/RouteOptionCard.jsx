@@ -20,8 +20,8 @@ export default function RouteOptionCard({ route, index }) {
 
   return (
     <div
-      className={`bg-gray-800 rounded-xl overflow-hidden border transition-colors ${
-        isSelected ? 'border-blue-500' : 'border-gray-700 hover:border-gray-600'
+      className={`bg-gray-100 rounded-xl overflow-hidden border transition-colors ${
+        isSelected ? 'border-blue-500' : 'border-gray-300 hover:border-gray-600'
       }`}
     >
       <button
@@ -29,11 +29,11 @@ export default function RouteOptionCard({ route, index }) {
         onClick={() => { selectRoute(index); setExpanded(!expanded); }}
       >
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Clock size={14} className="text-gray-400" />
-            <span className="text-white font-semibold">{duration}</span>
+          <div className="flex items-center gap-1.5">
+            <Clock size={14} className="text-gray-600" />
+            <span className="text-gray-900 font-semibold">{duration}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
+          <div className="flex items-center gap-1.5 text-sm text-gray-600">
             <span>{departureTime}</span>
             <ArrowRight size={12} />
             <span>{arrivalTime}</span>
@@ -60,9 +60,9 @@ export default function RouteOptionCard({ route, index }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-700 px-4 pb-4 pt-3">
+        <div className="border-t border-gray-300 px-4 pb-4 pt-3">
           <RouteTimeline leg={leg} />
-          <button className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+          <button className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 bg-gray-200 hover:bg-gray-600 rounded-lg text-sm transition-colors">
             <Bell size={14} /> Set Departure Alert
           </button>
         </div>

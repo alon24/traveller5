@@ -12,10 +12,11 @@
 - [x] Create PROJECT.md
 
 ## Phase 2 — Map & Location
-- [ ] Wire useGeolocation to AppShell (start watch on mount)
-- [ ] Verify TransitMap loads correctly with a valid API key
-- [ ] UserMarker shows GPS position as blue dot
-- [ ] Map centers on user location when GPS acquired
+- [x] Wire useGeolocation to AppShell (start watch on mount)
+- [x] Verify TransitMap loads correctly with a valid API key
+- [x] UserMarker shows GPS position as blue dot
+- [x] Map centers on user location when GPS acquired
+- [x] **New**: Manual location selection on dashboard (Zustand + Modal)
 
 ## Phase 3 — Trip Planning
 - [ ] PlaceAutocomplete works with Google Places (Israel-restricted)
@@ -40,7 +41,8 @@
 - [ ] BusMarker component renders on map with correct position
 - [ ] BusMarker click shows route info
 - [ ] useTripUpdates fetches delay data
-- [ ] ArrivalRow shows ETA from scheduled time + delay
+- [x] ArrivalRow shows ETA from scheduled time + delay
+- [x] **New**: Graceful handling of "Invalid stop code" errors in arrivals
 
 ## Phase 6 — Trains
 - [ ] StationPicker loads israel-rail-stations.json and filters

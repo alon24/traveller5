@@ -1,7 +1,7 @@
 import { railApi } from './axiosInstance';
 import { format } from 'date-fns';
 
-export async function getTrainDepartures(fromStation, toStation, date = new Date()) {
+export async function getTrainDepartures(fromStation, toStation, date = new Date(), signal) {
   const { data } = await railApi.get('/Plan/GetRoutes', {
     params: {
       FromStation: fromStation,
@@ -11,6 +11,7 @@ export async function getTrainDepartures(fromStation, toStation, date = new Date
       Mot: 0,
       scheduleType: 1,
     },
+    signal,
   });
   return data?.Data?.Routes || [];
 }

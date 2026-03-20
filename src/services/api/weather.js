@@ -60,7 +60,7 @@ export async function getHourlyForecast(lat, lng) {
     timezone: 'auto',
   });
   const { time, temperature_2m, apparent_temperature, weather_code } = data.hourly;
-  return time.slice(0, 16).map((t, i) => ({
+  return time.slice(0, 24).map((t, i) => ({
     dt: new Date(t).getTime() / 1000,
     main: { temp: temperature_2m[i], feels_like: apparent_temperature[i] },
     weather: [{ id: wmoToId(weather_code[i]), description: WMO_DESC[weather_code[i]] ?? 'unknown' }],

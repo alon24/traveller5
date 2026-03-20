@@ -64,9 +64,9 @@ export default function TrainMap({ route, stations }) {
     mapRef.current.fitBounds(bounds, 50);
   }, [stops, isLoaded]);
 
-  if (!isLoaded || geocoding) return <LoadingSpinner className="h-full bg-gray-900" />;
+  if (!isLoaded || geocoding) return <LoadingSpinner className="h-full bg-gray-50" />;
   if (!stops.length) return (
-    <div className="h-full bg-gray-900 flex items-center justify-center text-gray-500 text-xs">
+    <div className="h-full bg-gray-50 flex items-center justify-center text-gray-500 text-xs">
       No station coordinates available
     </div>
   );

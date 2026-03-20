@@ -1,21 +1,20 @@
-import { useState, useEffect } from 'react';
-import { getRouteByGtfsId, findBestTerminalsByRef, findTerminalStops } from '../services/api/gtfsRoutes';
 import { getLineStopsFromStride } from '../services/api/stride';
+import { useQuery } from '@tanstack/react-query';
 
-async function getStopsForShape(relId) {
+async function getStopsForShape(relId, signal) {
   if (relId.startsWith('gtfs:')) {
     const gtfsRouteId = relId.slice(5);
-    const route = await getRouteByGtfsId(gtfsRouteId);
+    const route = await getRouteByGtfsId(gtfsRouteId, signal);
     if (route?.ref) {
       try {
-        const stops = await getLineStopsFromStride(route.ref, gtfsRouteId);
+        const stops = await getLineStopsFromStride(route.ref, gtfsRouteId, signal);
         if (stops) return stops;
       } catch {}
-      return findTerminalStops(route.from, route.to);
+      return findTerminalStops(route.from, route.to, signal);
     }
     // gtfsRouteId is a SIRI line_ref (integer) — use Stride directly
     try {
-      const stops = await getLineStopsFromStride(null, gtfsRouteId);
+      const stops = await getLineStopsFromStride(null, gtfsRouteId, signal);
       if (stops) return stops;
     } catch {}
     return null;
@@ -29,25 +28,25 @@ async function getStopsForShape(relId) {
     if (stopCode) {
       try {
         const { getLineRefsForStopAndLine } = await import('../services/api/stride');
-        const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef);
+        const lineRefs = await getLineRefsForStopAndLine(stopCode, lineRef, signal);
         if (lineRefs?.length) {
-          const stops = await getLineStopsFromStride(null, lineRefs[0]);
+          const stops = await getLineStopsFromStride(null, lineRefs[0], signal);
           if (stops) return stops;
         }
       } catch {}
     }
 
     try {
-      const stops = await getLineStopsFromStride(lineRef);
+      const stops = await getLineStopsFromStride(lineRef, null, signal);
       if (stops) return stops;
     } catch {}
-    return findBestTerminalsByRef(lineRef);
+    return findBestTerminalsByRef(lineRef, signal);
   }
   return null; // OSM relation — shape comes from routeStops directly
 }
 
-async function fetchShape(relId) {
-  const allStops = await getStopsForShape(relId);
+async function fetchShape(relId, signal) {
+  const allStops = await getStopsForShape(relId, signal);
   if (!allStops || allStops.length < 2) return null;
 
   const from = allStops[0];
@@ -128,42 +127,16 @@ async function fetchShape(relId) {
   return shape.length >= 2 ? shape : null;
 }
 
-// Module-level shape cache keyed by normalized line ref ("mot-line:16", "gtfs:12345").
-// Route shapes are stable for the browser session (route geometry changes < once a day).
-const _shapeCache = new Map(); // cacheKey → Promise<shape>
-
-function normalizeShapeKey(relId) {
-  if (!relId?.startsWith('mot-line:')) return relId;
-  const inner = relId.slice(9);
-  const colon = inner.indexOf(':');
-  return colon === -1 ? relId : `mot-line:${inner.slice(0, colon)}`;
-}
-
-// Returns null while loading, [] if no shape found, or [{lat, lng}] on success.
-// Only fires for gtfs: / mot-line: prefixes; OSM relation IDs return null so
-// NearbyMap falls back to the routeStops sequence.
 export function useRouteShape(relId) {
-  const [shape, setShape] = useState(null);
+  const isCorrectType = relId && typeof relId === 'string' && (relId.startsWith('gtfs:') || relId.startsWith('mot-line:'));
 
-  useEffect(() => {
-    if (!relId || typeof relId !== 'string' || (!relId.startsWith('gtfs:') && !relId.startsWith('mot-line:'))) {
-      setShape(null);
-      return;
-    }
-    let cancelled = false;
-    setShape(null); // clear previous while loading
+  const { data, isLoading } = useQuery({
+    queryKey: ['route-shape', relId],
+    queryFn: ({ signal }) => fetchShape(relId, signal),
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    enabled: !!isCorrectType,
+  });
 
-    const cacheKey = normalizeShapeKey(relId);
-    let promise = _shapeCache.get(cacheKey);
-    if (!promise) {
-      promise = fetchShape(relId).catch(() => []);
-      _shapeCache.set(cacheKey, promise);
-    }
-    promise
-      .then((s) => { if (!cancelled) setShape(s ?? []); })
-      .catch(() => { if (!cancelled) setShape([]); });
-    return () => { cancelled = true; };
-  }, [relId]);
-
-  return shape;
+  return isLoading ? null : (data ?? []);
 }

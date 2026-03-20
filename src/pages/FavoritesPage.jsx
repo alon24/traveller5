@@ -16,10 +16,10 @@ export default function FavoritesPage() {
   const groups = groupByStop(favorites);
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen pb-16 lg:pb-0 overflow-hidden">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen pb-14 lg:pb-0 overflow-hidden">
       {/* Header */}
-      <div className="shrink-0 bg-gray-950 px-4 pt-4 pb-3 border-b border-gray-800">
-        <h1 className="text-white font-bold text-base flex items-center gap-2">
+      <div className="shrink-0 bg-white px-4 pt-4 pb-3 border-b border-gray-200">
+        <h1 className="text-gray-900 font-bold text-base flex items-center gap-1.5">
           <Star size={16} className="text-yellow-400" fill="currentColor" />
           Favorites
         </h1>
@@ -28,7 +28,7 @@ export default function FavoritesPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {favorites.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-600">
+          <div className="flex flex-col items-center justify-center h-full gap-1.5 text-gray-600">
             <Star size={36} className="opacity-30" />
             <p className="text-sm">No favorites yet</p>
             <p className="text-xs text-center px-8">
@@ -38,18 +38,18 @@ export default function FavoritesPage() {
         )}
 
         {groups.map((group) => (
-          <div key={group.stopId} className="border-b border-gray-800">
+          <div key={group.stopId} className="border-b border-gray-200">
             {/* Stop header */}
-            <div className="flex items-center gap-2 px-4 py-2 bg-gray-900">
+            <div className="flex items-center gap-1.5 px-4 py-2 bg-gray-50">
               <MapPin size={13} className="text-gray-500 shrink-0" />
-              <span className="text-sm font-medium text-white truncate">{group.stopName}</span>
+              <span className="text-sm font-medium text-gray-900 truncate">{group.stopName}</span>
             </div>
 
             {/* Lines at this stop */}
             {group.lines.map((fav) => (
               <div
                 key={fav.id}
-                className="flex items-center gap-3 px-4 py-3 border-t border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 border-t border-gray-200/50 hover:bg-gray-100/30 transition-colors"
               >
                 {/* Badge */}
                 <span
@@ -62,7 +62,7 @@ export default function FavoritesPage() {
                 {/* Direction */}
                 <div className="flex-1 min-w-0">
                   {fav.routeTo ? (
-                    <span className="text-xs text-gray-400 truncate block">→ {fav.routeTo}</span>
+                    <span className="text-xs text-gray-600 truncate block">→ {fav.routeTo}</span>
                   ) : (
                     <span className="text-xs text-gray-600">—</span>
                   )}

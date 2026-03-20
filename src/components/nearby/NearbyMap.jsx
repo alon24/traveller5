@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api';
-import { Loader } from 'lucide-react';
+import { Loader, Bus } from 'lucide-react';
 import { GOOGLE_MAPS_LIBRARIES } from '../map/TransitMap';
 import { useLocationStore } from '../../stores/useLocationStore';
 import AdvancedMarker from '../map/AdvancedMarker';
@@ -41,11 +41,12 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
 
   const handleBusLeave = useCallback(() => setTooltip(null), []);
 
+  const [libraries] = useState(GOOGLE_MAPS_LIBRARIES);
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
     language: 'he',
     region: 'IL',
-    libraries: GOOGLE_MAPS_LIBRARIES,
+    libraries,
   });
 
   const nearbyById = useMemo(() => {
@@ -102,8 +103,8 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
     // Create the polyline once and reuse it (avoids leaving stale instances on map)
     if (!polyRef.current) {
       polyRef.current = new maps.Polyline({
-        strokeOpacity: 0.85,
-        strokeWeight:  4,
+        strokeOpacity: 1.0,
+        strokeWeight:  5,
         zIndex:        20,
       });
     }
@@ -123,7 +124,7 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
     return () => { if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null; } };
   }, []);
 
-  if (!isLoaded) return <LoadingSpinner className="h-full bg-gray-900" />;
+  if (!isLoaded) return <LoadingSpinner className="h-full bg-gray-50" />;
   const routeStopIds = new Set(routeStopsWithBearing.map((s) => s.id));
 
   function zoomToMe() {
@@ -139,7 +140,7 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
       <button
         onClick={zoomToMe}
         title="Zoom to my location"
-        className="absolute bottom-24 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-gray-900/90 border border-gray-600 shadow-lg text-blue-400 hover:text-blue-300 hover:border-blue-500 active:scale-95 transition-all"
+        className="absolute bottom-24 right-3 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-gray-50/90 border border-gray-600 shadow-lg text-blue-400 hover:text-blue-300 hover:border-blue-500 active:scale-95 transition-all"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="3" />
@@ -150,8 +151,8 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
     )}
     {routeLoading && (
       <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-        <div className="flex items-center gap-2 pl-3 pr-2 py-2 rounded-full bg-gray-900/90 border border-gray-700 shadow-lg">
-          <Loader size={14} className="animate-spin text-white" />
+        <div className="flex items-center gap-1.5 pl-3 pr-2 py-2 rounded-full bg-gray-50/90 border border-gray-300 shadow-lg">
+          <Loader size={14} className="animate-spin text-gray-900" />
           {activeLine?.ref && (
             <span
               className="text-sm font-bold font-mono text-white px-2 py-0.5 rounded"
@@ -196,7 +197,7 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
         const firstNearby   = !!nearbyById[first.id];
         const lastNearby    = !!nearbyById[last.id];
         const lastSelected  = last.id === selectedId;
-        const sz = firstSelected ? 20 : 16;
+        const sz = firstSelected ? 24 : 18;
         return (
           <>
             {/* Arrow at first stop (only if there are 2+ stops for direction) */}
@@ -206,14 +207,27 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
                 position={{ lat: first.lat, lng: first.lng }}
                 title={first.name || ''}
                 zIndex={firstSelected ? 60 : firstNearby ? 40 : 25}
-                onClick={firstNearby ? () => onSelectStop(first.id === selectedId ? null : first.id) : undefined}
+                onClick={firstNearby ? () => {
+                  onSelectStop(first.id === selectedId ? null : first.id);
+                  if (mapRef.current && mapRef.current.getZoom() < 17) mapRef.current.setZoom(17);
+                } : undefined}
                 cursor={firstNearby ? 'pointer' : 'default'}
               >
-                <svg width={sz} height={sz} viewBox="-10 -10 20 20"
-                  style={{ transform: `rotate(${first.bearing}deg)`, display: 'block', transformOrigin: 'center' }}>
-                  <polygon points="0,-8 5,4 0,1 -5,4"
-                    fill={firstSelected ? '#3B82F6' : color} stroke="white" strokeWidth="1.5" />
-                </svg>
+                <div 
+                  className={`flex items-center justify-center rounded-full border-2 shadow-sm transition-all bg-white overflow-hidden ${firstSelected ? 'scale-125 ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                  style={{ 
+                    width: sz, 
+                    height: sz, 
+                    borderColor: firstSelected ? '#3B82F6' : color,
+                    color: firstSelected ? '#3B82F6' : color
+                  }}
+                >
+                  <svg width={sz * 0.75} height={sz * 0.75} viewBox="-10 -10 20 20"
+                    style={{ transform: `rotate(${first.bearing}deg)`, display: 'block', transformOrigin: 'center' }}>
+                    <polygon points="0,-8 5,4 0,1 -5,4"
+                      fill="currentColor" stroke="white" strokeWidth="1.5" />
+                  </svg>
+                </div>
               </AdvancedMarker>
             )}
             {/* Dot at last stop */}
@@ -222,16 +236,28 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
               position={{ lat: last.lat, lng: last.lng }}
               title={last.name || ''}
               zIndex={lastSelected ? 60 : lastNearby ? 40 : 25}
-              onClick={lastNearby ? () => onSelectStop(last.id === selectedId ? null : last.id) : undefined}
+              onClick={lastNearby ? () => {
+                onSelectStop(last.id === selectedId ? null : last.id);
+                if (mapRef.current && mapRef.current.getZoom() < 17) mapRef.current.setZoom(17);
+              } : undefined}
               cursor={lastNearby ? 'pointer' : 'default'}
             >
+            <div 
+              className={`flex items-center justify-center rounded-full border-2 shadow-sm transition-all bg-white overflow-hidden ${lastSelected ? 'scale-125 ring-2 ring-blue-500 ring-offset-1' : ''}`}
+              style={{ 
+                width: sz, 
+                height: sz, 
+                borderColor: lastSelected ? '#3B82F6' : color,
+                color: lastSelected ? '#3B82F6' : color
+              }}
+            >
               <div style={{
-                width: lastSelected ? 14 : 10,
-                height: lastSelected ? 14 : 10,
+                width: sz * 0.5,
+                height: sz * 0.5,
                 borderRadius: '50%',
-                background: lastSelected ? '#3B82F6' : color,
-                border: `${lastSelected ? 2.5 : 1.5}px solid #fff`,
+                background: 'currentColor',
               }} />
+            </div>
             </AdvancedMarker>
           </>
         );
@@ -241,22 +267,31 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
       {routeStopsWithBearing.slice(1, -1).map((stop) => {
         const isNearby   = !!nearbyById[stop.id];
         const isSelected = stop.id === selectedId;
-        const sz = isSelected ? 12 : 7;
+        const sz = isSelected ? 20 : 14;
         return (
           <AdvancedMarker
             key={`route-mid-${stop.id}`}
             position={{ lat: stop.lat, lng: stop.lng }}
             title={stop.name || ''}
             zIndex={isSelected ? 55 : isNearby ? 35 : 15}
-            onClick={isNearby ? () => onSelectStop(stop.id === selectedId ? null : stop.id) : undefined}
+            onClick={isNearby ? () => {
+              onSelectStop(stop.id === selectedId ? null : stop.id);
+              if (mapRef.current && mapRef.current.getZoom() < 17) mapRef.current.setZoom(17);
+            } : undefined}
             cursor={isNearby ? 'pointer' : 'default'}
           >
-            <div style={{
-              width: sz, height: sz, borderRadius: '50%',
-              background: isSelected ? '#3B82F6' : color,
-              border: `${isSelected ? 2 : 1.5}px solid #fff`,
-              opacity: 0.9,
-            }} />
+            <div 
+              className={`flex items-center justify-center rounded-full border-2 shadow-sm transition-all bg-white overflow-hidden ${isSelected ? 'scale-125 ring-2 ring-blue-500 ring-offset-1' : ''}`}
+              style={{ 
+                width: sz, 
+                height: sz, 
+                borderColor: isSelected ? '#3B82F6' : color,
+                color: isSelected ? '#3B82F6' : color,
+                opacity: isNearby ? 1.0 : 0.8
+              }}
+            >
+              <Bus size={sz * 0.65} />
+            </div>
           </AdvancedMarker>
         );
       })}
@@ -264,21 +299,30 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
       {/* Nearby stop circles (those not already shown as route arrows) */}
       {stops.filter((s) => !routeStopIds.has(s.id)).map((stop) => {
         const isSelected = stop.id === selectedId;
-        const sz = isSelected ? 16 : 10;
+        const sz = isSelected ? 24 : 18;
         return (
           <AdvancedMarker
             key={stop.id}
             position={{ lat: stop.lat, lng: stop.lng }}
             title={stop.name}
             zIndex={isSelected ? 50 : 10}
-            onClick={() => onSelectStop(stop.id === selectedId ? null : stop.id)}
+            onClick={() => {
+              onSelectStop(stop.id === selectedId ? null : stop.id);
+              if (mapRef.current && mapRef.current.getZoom() < 17) mapRef.current.setZoom(17);
+            }}
             cursor="pointer"
           >
-            <div style={{
-              width: sz, height: sz, borderRadius: '50%',
-              background: isSelected ? '#3B82F6' : '#10B981',
-              border: `${isSelected ? 2.5 : 1.5}px solid #fff`,
-            }} />
+            <div 
+              className={`flex items-center justify-center rounded-full border-2 shadow-sm transition-all bg-white overflow-hidden ${isSelected ? 'scale-125 ring-2 ring-blue-500 ring-offset-1' : ''}`}
+              style={{ 
+                width: sz, 
+                height: sz, 
+                borderColor: isSelected ? '#3B82F6' : '#10B981',
+                color: isSelected ? '#3B82F6' : '#10B981'
+              }}
+            >
+              <Bus size={sz * 0.6} />
+            </div>
           </AdvancedMarker>
         );
       })}
@@ -295,32 +339,42 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
           <div
             onMouseEnter={(e) => handleBusEnter(bus, e)}
             onMouseLeave={handleBusLeave}
-            style={{ transform: `rotate(${bus.bearing ?? 0}deg)`, display: 'inline-block', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.45))', cursor: 'default' }}
+            className="relative flex items-center justify-center z-[80] drop-shadow-md"
+            style={{ width: 42, height: 28, cursor: 'pointer' }}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="52" height="28" viewBox="0 0 52 28">
-              {/* Body */}
-              <rect x="2" y="4" width="44" height="18" rx="4" fill={color} />
-              {/* Roof highlight */}
-              <rect x="4" y="4" width="40" height="5" rx="3" fill="white" opacity="0.18" />
-              {/* Front face (right side = direction of travel) */}
-              <rect x="44" y="4" width="6" height="18" rx="2" fill={color} />
-              <rect x="45" y="6" width="4" height="7" rx="1" fill="white" opacity="0.85" />
-              {/* Headlight */}
-              <rect x="46" y="14" width="3" height="3" rx="0.5" fill="#FFF176" />
-              {/* Rear */}
-              <rect x="2" y="6" width="4" height="8" rx="1" fill="white" opacity="0.3" />
-              {/* Windows */}
-              <rect x="9"  y="6" width="8" height="7" rx="1.5" fill="white" opacity="0.82" />
-              <rect x="20" y="6" width="8" height="7" rx="1.5" fill="white" opacity="0.82" />
-              <rect x="31" y="6" width="8" height="7" rx="1.5" fill="white" opacity="0.82" />
-              {/* Door */}
-              <rect x="9" y="14" width="8" height="6" rx="1" fill="white" opacity="0.35" />
-              {/* Wheels */}
-              <circle cx="12" cy="23" r="4" fill="#222" stroke="white" strokeWidth="1.5" />
-              <circle cx="38" cy="23" r="4" fill="#222" stroke="white" strokeWidth="1.5" />
-              {/* Outline */}
-              <rect x="2" y="4" width="44" height="18" rx="4" fill="none" stroke="white" strokeWidth="1.5" />
+            {/* Bus Skeleton Icon */}
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="24" viewBox="0 0 24 24" className="overflow-visible">
+              <g stroke="white" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+              </g>
+              <g stroke={color || '#1D4ED8'} strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+              </g>
             </svg>
+
+            {/* Line Number Badge */}
+            {activeLine?.ref && (
+              <div 
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm border border-white"
+                style={{ backgroundColor: color || '#1D4ED8' }}
+              >
+                {activeLine.ref}
+              </div>
+            )}
+
+            {/* Live Pulsating Indicator */}
+            <div className="absolute top-0.5 left-0.5 flex items-center justify-center">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              <div className="absolute w-2.5 h-2.5 rounded-full bg-red-500 opacity-40 animate-ping" />
+            </div>
+
+            {/* Direction Pointer */}
+            <div 
+              className="absolute inset-x-0 bottom-0 top-0 pointer-events-none"
+              style={{ transform: `rotate(${bus.bearing ?? 0}deg)` }}
+            >
+              <div className="absolute -top-[6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[6px] border-b-gray-700 drop-shadow-sm" />
+            </div>
           </div>
         </AdvancedMarker>
       ))}
@@ -338,7 +392,7 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
       const flipX = tooltip.x > (mapContainerRef.current?.clientWidth ?? 400) - 160;
       return (
         <div
-          className="pointer-events-none absolute z-30 px-3 py-2 rounded-xl bg-gray-900/95 border border-gray-700 shadow-xl text-white text-xs leading-snug"
+          className="pointer-events-none absolute z-30 px-2.5 py-2 rounded-xl bg-gray-50/95 border border-gray-300 shadow-xl text-gray-900 text-xs leading-snug"
           style={{
             left:      flipX ? tooltip.x - 8  : tooltip.x + 12,
             top:       tooltip.y - 12,
@@ -347,8 +401,8 @@ export default function NearbyMap({ stops, selectedId, onSelectStop, routeStops,
           }}
         >
           {lineRef && <div className="font-bold text-sm mb-0.5" style={{ color }}>{lineRef}</div>}
-          {lineTo  && <div className="text-gray-300 truncate max-w-[140px]">{lineTo}</div>}
-          <div className="text-gray-400 mt-1">{dir} · {tooltip.bus.velocity ? `${Math.round(tooltip.bus.velocity)} km/h` : 'stopped'}</div>
+          {lineTo  && <div className="text-gray-700 truncate max-w-[140px]">{lineTo}</div>}
+          <div className="text-gray-600 mt-1">{dir} · {tooltip.bus.velocity ? `${Math.round(tooltip.bus.velocity)} km/h` : 'stopped'}</div>
           {secsAgo !== null && (
             <div className="text-gray-500 mt-0.5">{secsAgo < 60 ? `${secsAgo}s ago` : `${Math.round(secsAgo/60)}m ago`}</div>
           )}

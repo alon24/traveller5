@@ -10,7 +10,7 @@ function WeatherBadge() {
   const temp = Math.round(current.main?.temp);
 
   return (
-    <div className="flex items-center gap-1 text-sm text-gray-300">
+    <div className="flex items-center gap-1 text-sm text-gray-700">
       <Icon size={16} className="text-blue-400" />
       <span>{temp}°C</span>
     </div>
@@ -19,8 +19,8 @@ function WeatherBadge() {
 
 export default function Header() {
   return (
-    <header className="lg:hidden sticky top-0 z-40 bg-gray-900 border-b border-gray-800 px-4 h-14 flex items-center justify-between">
-      <span className="text-white font-bold">🚌 TransitIL</span>
+    <header className="lg:hidden sticky top-0 z-40 bg-white border-b border-gray-200 px-4 h-12 flex items-center justify-between">
+      <span className="text-gray-900 font-bold">TransitIL</span>
       <WeatherBadge />
     </header>
   );

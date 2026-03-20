@@ -11,16 +11,16 @@ const tabs = [
 
 export default function BottomNav() {
   return (
-    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-gray-900 border-t border-gray-800 z-50">
-      <div className="flex justify-around items-center h-16">
+    <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-gray-50 border-t border-gray-200 z-50">
+      <div className="flex justify-around items-center h-14">
         {tabs.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-3 py-2 text-xs transition-colors ${
-                isActive ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+              `flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] transition-colors ${
+                isActive ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'
               }`
             }
           >

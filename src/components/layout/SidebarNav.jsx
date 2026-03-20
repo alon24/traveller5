@@ -14,9 +14,9 @@ const items = [
 
 export default function SidebarNav() {
   return (
-    <aside className="hidden lg:flex flex-col w-56 bg-gray-900 border-r border-gray-800 min-h-screen pt-6">
+    <aside className="hidden lg:flex flex-col w-56 bg-gray-50 border-r border-gray-200 min-h-screen pt-6">
       <div className="px-4 mb-6">
-        <span className="text-white font-bold text-lg">🚌 TransitIL</span>
+        <span className="text-gray-900 font-bold text-lg">🚌 TransitIL</span>
       </div>
       <nav className="flex flex-col gap-1 px-2">
         {items.map(({ to, icon: Icon, label }) => (
@@ -25,10 +25,10 @@ export default function SidebarNav() {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors ${
                 isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
               }`
             }
           >

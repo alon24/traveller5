@@ -135,7 +135,7 @@ The API key is embedded in `index.html` as a `<script src="...key=...">` tag.
 ## 5. State Management (Zustand Stores)
 
 ### `useLocationStore`
-Wraps the browser Geolocation API. Exposes `coords {lat, lng}`, `accuracy`, and a boolean `watching`. Falls back to a user-configurable location (default: Rehovot) stored in localStorage when GPS is unavailable or denied.
+Wraps the browser Geolocation API. Exposes `coords {lat, lng}`, `accuracy`, and a boolean `watching`. Supports **manual location overrides** (`isManual: true`) with user-defined labels, bypassing GPS. Falls back to a user-configurable location (default: Rehovot) stored in localStorage when GPS is unavailable.
 
 ### `useMapStore`
 Viewport state (`center`, `zoom`) plus UI toggles (`showBusMarkers`, `showStopMarkers`). Also holds `selectedStopId` and `selectedVehicleId` for map-driven selection.
@@ -247,7 +247,9 @@ Returns a `resolveRelId(stopCode, lineRef, lineTo)` function. On call:
 
 ### `useStopArrivals(stopCode)`
 
-CurlBus proxy at `/proxy/curlbus/{stopCode}`. Returns `[{lineRef, etaMinutes}]` sorted ascending by ETA. Polls every 30 s, stale after 20 s. Used in the `LineArrivalsStrip` sub-component of each active line row.
+CurlBus proxy at `/proxy/curlbus/{stopCode}`. Returns `[{lineRef, etaMinutes}]` sorted ascending by ETA. Polls every 30 s, stale after 20 s. 
+
+**Error Handling:** Specifically handles "Invalid stop code" errors from the proxy (common for stops existing in GTFS but not yet in the live arrival system) by throwing a cleaned error that the UI renders as "Real-time data currently unavailable".
 
 ### `useLineSearch(lineRef, city)`
 
@@ -262,7 +264,7 @@ The `NearbyPage` is the most complex component. It combines four tabs in one vie
 ### Tab state isolation
 
 Each tab has independent selection state:
-- **Nearby tab:** `selectedId` (expanded stop), `selectedLine {ref, relId, colour, stopId}`
+- **Nearby tab:** `selectedId` (expanded stop), `selectedLine {ref, relId, colour, stopId, stopCode}`
 - **Lines tab:** `selectedSearchLine {ref, relId, colour, to}`
 - **Favorites tab:** `selectedFav {routeRef, routeRelId, routeColour, routeTo}`
 - **Trains tab:** `selectedTrainIdx`
@@ -502,7 +504,8 @@ useNearbyStops(lat, lng)
         ref: "16",
         relId: "mot-line:16:20012",   ← stop code embedded
         colour: "#...",
-        stopId: "..."
+        stopId: "...",
+        stopCode: "20012"
       }
               │
       ┌───────────┬────────────────────┐

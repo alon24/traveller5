@@ -2,11 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useEffect } from 'react';
 import { NEARBY_RADIUS_METERS } from '../config/constants';
 import { overpassQuery } from '../services/api/overpass';
-import { getGtfsStops, getGtfsRoutes } from '../services/api/gtfsRoutes';
+import { getGtfsStops, getGtfsRoutes, extractCity, normalizeName } from '../services/api/gtfsRoutes';
 import { getLineRefsForStopAndLine } from '../services/api/stride';
 
 // ── localStorage cache ────────────────────────────────────────────
-const CACHE_VER  = 'ns8';
+const CACHE_VER  = 'ns13';
 const STOPS_TTL  = 5  * 60 * 1000;
 const ROUTES_TTL = 15 * 60 * 1000;
 
@@ -40,27 +40,23 @@ function haversine(lat1, lng1, lat2, lng2) {
 
 // ── Phase 1: GTFS stops (local, no network after first load) ──────
 // getGtfsStops() is a module-level promise — subsequent calls are instant.
-async function fetchBaseStops(lat, lng, radius) {
-  const key = lsKey('stops', lat, lng, radius);
-  const cached = lsRead(key, STOPS_TTL);
-  if (cached) return cached;
-
-  const allStops = await getGtfsStops();
+async function fetchBaseStops(lat, lng, radius, signal) {
+  const allStops = await getGtfsStops(signal);
 
   const stops = allStops
     .filter(s => s.lat && s.lng && s.stopCode && haversine(lat, lng, s.lat, s.lng) <= radius)
     .map(s => ({
-      id:       `gtfs-${s.stopId || s.stopCode}`,
+      id:       String(s.stopCode || s.stopId),
       name:     s.name,
       ref:      s.stopCode,
       lat:      s.lat,
       lng:      s.lng,
+      city:     s.city,
       distance: Math.round(haversine(lat, lng, s.lat, s.lng)),
       routes:   [],          // filled in by Phase 2
     }))
     .sort((a, b) => a.distance - b.distance);
 
-  lsWrite(key, stops);
   return stops;
 }
 
@@ -70,11 +66,7 @@ async function fetchBaseStops(lat, lng, radius) {
 // Colour + destination come from the already-cached GTFS routes, with geographic
 // disambiguation: for each node × line-ref, pick the GTFS variant whose `from`
 // terminal is geographically closest to the node.
-async function fetchRouteMap(lat, lng, radius) {
-  const key = lsKey('routes', lat, lng, radius);
-  const cached = lsRead(key, ROUTES_TTL);
-  if (cached) return cached;
-
+async function fetchRouteMap(lat, lng, radius, signal) {
   // Nodes-only — no rel(bn.stops) — avoids the slow relation traversal
   const query = `
     [out:json][timeout:10];
@@ -90,9 +82,9 @@ async function fetchRouteMap(lat, lng, radius) {
 
   // Both caches are module-level promises — no extra network call after first load
   const [data, gtfsRoutes, allGtfsStops] = await Promise.all([
-    overpassQuery(query),
-    getGtfsRoutes().catch(() => []),
-    getGtfsStops().catch(() => []),
+    overpassQuery(query, signal),
+    getGtfsRoutes(signal).catch(() => []),
+    getGtfsStops(signal).catch(() => []),
   ]);
 
   // ── Build per-ref variant lists ──────────────────────────────────────────
@@ -108,46 +100,96 @@ async function fetchRouteMap(lat, lng, radius) {
     }
   }
 
-  // ── Index GTFS stops by 3-char Hebrew name prefix ────────────────────────
+  // ── Index GTFS stops by exact name ───────────────────────────────────────
   // Used to resolve a terminal name (e.g. "הר הצופים") to a lat/lng so we can
   // measure how far each GTFS variant's origin is from an OSM node.
-  const stopsByPrefix = {}; // 3-char prefix → [{lat, lng}]
+  const stopsByName = new Map();
   for (const s of allGtfsStops) {
     if (!s.name || !s.lat || !s.lng) continue;
-    const prefix = s.name.trim().slice(0, 3);
-    if (!stopsByPrefix[prefix]) stopsByPrefix[prefix] = [];
-    stopsByPrefix[prefix].push({ lat: s.lat, lng: s.lng });
+    const norm = normalizeName(s.name);
+    if (!stopsByName.has(norm)) stopsByName.set(norm, []);
+    stopsByName.get(norm).push({ lat: s.lat, lng: s.lng });
   }
 
-  // Find the nearest GTFS stop whose name starts with `termName` to (nodeLat, nodeLng).
+  // Find the nearest GTFS stop whose exact name matches the terminal
   // Returns Infinity if no matching stop found.
-  function nearestTermDist(termName, nodeLat, nodeLng) {
-    if (!termName) return Infinity;
-    const prefix = termName.trim().slice(0, 3);
-    const candidates = stopsByPrefix[prefix] || [];
+  function nearestTermDist(termStr, nodeLat, nodeLng) {
+    if (!termStr) return Infinity;
+    
+    // Normalize the terminal name (removes common abbreviations and punctuation)
+    const stopName = normalizeName(termStr);
+
+    const candidates = stopsByName.get(stopName) || [];
     let best = Infinity;
-    for (const s of candidates) {
-      const d = haversine(nodeLat, nodeLng, s.lat, s.lng);
+    for (const c of candidates) {
+      const d = haversine(nodeLat, nodeLng, c.lat, c.lng);
       if (d < best) best = d;
     }
+    
+    // Fallback: fuzzy match for slight spelling differences (e.g. "תחנת רכבת" vs "ת. רכבת")
+    // but ONLY if the terminal doesn't mention a completely different city.
+    if (best === Infinity && stopName.length >= 4) {
+      for (const [name, locs] of stopsByName.entries()) {
+        // Tighten check: must have high overlap, not just "includes"
+        if (name.includes(stopName) || stopName.includes(name)) {
+          for (const c of locs) {
+            const d = haversine(nodeLat, nodeLng, c.lat, c.lng);
+            if (d < best) best = d;
+          }
+        }
+      }
+      if (best !== Infinity) best += 20000; // 20km penalty for loose naming match
+    }
+    
     return best;
   }
 
+  // To prevent "Line 14 Jerusalem" winning in Rehovot, we determine the
+  // dominant city of the current search area based on nearby GTFS stops.
+  const cityCounts = {};
+  for (const s of allGtfsStops) {
+    if (haversine(lat, lng, s.lat, s.lng) <= radius * 1.5 && s.city) {
+      cityCounts[s.city] = (cityCounts[s.city] || 0) + 1;
+    }
+  }
+  const contextCity = Object.entries(cityCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
   // For a given line ref and OSM node location, pick the GTFS variant whose
-  // `from` terminal is geographically closest to the node. Falls back to
-  // `to`-based matching if `from` is empty (rare), then to first variant.
-  function pickBestVariant(ref, nodeLat, nodeLng) {
+  // `from` terminal is geographically closest to the node. 
+  // Penalizes variants that mention a different city than the local context.
+  function pickBestVariant(ref, nodeLat, nodeLng, nodeCity) {
     const variants = gtfsVariants[ref];
     if (!variants?.length) return null;
     if (variants.length === 1) return variants[0];
 
-    let best = null, bestDist = Infinity;
+    let best = null, bestScore = Infinity;
+    const localCity = (nodeCity || contextCity || '').toLowerCase();
+
     for (const v of variants) {
-      // Prefer from-terminal distance; fall back to to-terminal
-      const d = v.from
+      // 1. Base distance to terminal
+      let d = v.from
         ? nearestTermDist(v.from, nodeLat, nodeLng)
         : nearestTermDist(v.to,   nodeLat, nodeLng);
-      if (d < bestDist) { bestDist = d; best = v; }
+      
+      const vTo   = (v.to   || '').toLowerCase();
+      const vFrom = (v.from || '').toLowerCase();
+      
+      // 2. City mismatch penalty
+      if (localCity && d !== Infinity) {
+        // If the variant belongs to a different city than our local context
+        const isSelfCity = vTo.includes(localCity) || vFrom.includes(localCity);
+        const mentionsOtherCity = variants.some(other => {
+           if (other === v) return false;
+           // If ANOTHER variant mentions our local city, this one is suspect
+           return other.to.toLowerCase().includes(localCity) || other.from.toLowerCase().includes(localCity);
+        });
+
+        if (!isSelfCity && mentionsOtherCity) {
+          d += 100000; // 100km mismatch penalty
+        }
+      }
+
+      if (d < bestScore) { bestScore = d; best = v; }
     }
     return best ?? variants[0];
   }
@@ -166,12 +208,13 @@ async function fetchRouteMap(lat, lng, radius) {
     const routeRefTag = node.tags?.route_ref || '';
     if (!routeRefTag) continue;
 
+    const nodeCity = extractCity(node.tags?.name || '');
     const routes = routeRefTag
       .split(';')
       .map(s => s.trim())
       .filter(Boolean)
       .map(ref => {
-        const v = pickBestVariant(ref, node.lat, node.lon);
+        const v = pickBestVariant(ref, node.lat, node.lon, nodeCity);
         return {
           ref,
           to:     v?.to     ?? '',
@@ -188,7 +231,6 @@ async function fetchRouteMap(lat, lng, radius) {
   }
 
   const result = { byCode, nodes };
-  lsWrite(key, result);
   return result;
 }
 
@@ -196,25 +238,18 @@ async function fetchRouteMap(lat, lng, radius) {
 export function useNearbyStops(lat, lng, radius = NEARBY_RADIUS_METERS) {
   const enabled = !!lat && !!lng;
 
-  // Pre-warm GTFS data (module-level promise caches — instant on repeated calls)
-  useEffect(() => {
-    if (enabled) { getGtfsStops(); getGtfsRoutes(); }
-  }, [enabled]);
-
   const baseQuery = useQuery({
     queryKey: ['nearby-base', lat?.toFixed(3), lng?.toFixed(3), radius],
-    queryFn:  () => fetchBaseStops(lat, lng, radius),
+    queryFn:  ({ signal }) => fetchBaseStops(lat, lng, radius, signal),
     enabled,
     staleTime: STOPS_TTL,
-    gcTime:    STOPS_TTL * 2,
   });
 
   const routeQuery = useQuery({
     queryKey: ['nearby-routes', lat?.toFixed(3), lng?.toFixed(3), radius],
-    queryFn:  () => fetchRouteMap(lat, lng, radius),
+    queryFn:  ({ signal }) => fetchRouteMap(lat, lng, radius, signal),
     enabled,
     staleTime: ROUTES_TTL,
-    gcTime:    ROUTES_TTL * 2,
   });
 
   const data = useMemo(() => {

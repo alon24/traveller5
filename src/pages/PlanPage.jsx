@@ -27,11 +27,11 @@ export default function PlanPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-xl font-bold text-white">Plan Trip</h1>
+      <h1 className="text-xl font-bold text-gray-900">Plan Trip</h1>
 
       {/* Origin / destination inputs */}
-      <div className="bg-gray-800 rounded-xl p-4 space-y-3 relative">
-        <div className="flex items-center gap-2">
+      <div className="bg-gray-100 rounded-xl p-4 space-y-3 relative">
+        <div className="flex items-center gap-1.5">
           <div className="flex-1">
             <PlaceAutocomplete
               placeholder="From…"
@@ -42,13 +42,13 @@ export default function PlanPage() {
           <button
             onClick={() => setPicker('origin')}
             title="Pick on map"
-            className="text-gray-400 hover:text-blue-400 transition-colors p-1"
+            className="text-gray-600 hover:text-blue-400 transition-colors p-1"
           >
             <MapPin size={16} />
           </button>
         </div>
-        <div className="border-t border-gray-700" />
-        <div className="flex items-center gap-2">
+        <div className="border-t border-gray-300" />
+        <div className="flex items-center gap-1.5">
           <div className="flex-1">
             <PlaceAutocomplete
               placeholder="To…"
@@ -59,14 +59,14 @@ export default function PlanPage() {
           <button
             onClick={() => setPicker('destination')}
             title="Pick on map"
-            className="text-gray-400 hover:text-blue-400 transition-colors p-1"
+            className="text-gray-600 hover:text-blue-400 transition-colors p-1"
           >
             <MapPin size={16} />
           </button>
         </div>
         <button
           onClick={swap}
-          className="absolute right-12 top-1/2 -translate-y-1/2 bg-gray-700 hover:bg-gray-600 p-2 rounded-full transition-colors"
+          className="absolute right-12 top-1/2 -translate-y-1/2 bg-gray-200 hover:bg-gray-600 p-2 rounded-full transition-colors"
         >
           <ArrowUpDown size={16} />
         </button>

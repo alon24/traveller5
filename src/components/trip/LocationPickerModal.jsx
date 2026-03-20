@@ -60,11 +60,11 @@ export default function LocationPickerModal({ isOpen, onClose, onConfirm, title 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-gray-950">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 h-14 bg-gray-900 border-b border-gray-800 shrink-0">
-        <span className="text-white font-medium">{title}</span>
-        <button onClick={handleClose} className="text-gray-400 hover:text-white">
+      <div className="flex items-center justify-between px-4 h-14 bg-gray-50 border-b border-gray-200 shrink-0">
+        <span className="text-gray-900 font-medium">{title}</span>
+        <button onClick={handleClose} className="text-gray-600 hover:text-gray-900">
           <X size={20} />
         </button>
       </div>
@@ -90,23 +90,23 @@ export default function LocationPickerModal({ isOpen, onClose, onConfirm, title 
             )}
           </GoogleMap>
         ) : (
-          <LoadingSpinner size="lg" className="h-full bg-gray-900" />
+          <LoadingSpinner size="lg" className="h-full bg-gray-50" />
         )}
 
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-gray-900/90 text-gray-300 text-sm px-3 py-1.5 rounded-full pointer-events-none">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-gray-50/90 text-gray-700 text-sm px-2.5 py-1 rounded-full pointer-events-none">
           Tap the map to drop a pin
         </div>
       </div>
 
       {/* Bottom confirm bar */}
-      <div className={`bg-gray-900 border-t border-gray-800 px-4 py-3 flex items-center gap-3 shrink-0 transition-opacity ${pin ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <p className="flex-1 text-sm text-gray-300 truncate">
+      <div className={`bg-gray-50 border-t border-gray-200 px-4 py-2 flex items-center gap-1.5 shrink-0 transition-opacity ${pin ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <p className="flex-1 text-sm text-gray-700 truncate">
           {label || 'Fetching address…'}
         </p>
         <button
           onClick={handleConfirm}
           disabled={!pin || !label}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm shrink-0"
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-gray-900 px-4 py-2 rounded-lg flex items-center gap-1.5 text-sm shrink-0"
         >
           <Check size={16} />
           Select

@@ -4,7 +4,6 @@ import { useLocationStore } from '../stores/useLocationStore';
 import { useNearbyStops } from '../hooks/useNearbyStops';
 import { useRouteStops } from '../hooks/useRouteStops';
 import { useRouteShape } from '../hooks/useRouteShape';
-import { useRelIdResolver } from '../hooks/useRelIdResolver';
 import { useSiriVehiclePositions } from '../hooks/useGtfsRealtime';
 import { useTrainSchedule } from '../hooks/useTrainSchedule';
 import { useLineSearch } from '../hooks/useLineSearch';
@@ -28,24 +27,21 @@ function haversine(lat1, lng1, lat2, lng2) {
 
 const NEARBY_FLEX = { default: [55, 45], list: [80, 20], map: [28, 72] };
 
-// Extract the destination city from a raw GTFS "to" string.
-// Input examples: "אקווריום ישראל-ירושלים-3א", "מרכז ביג/המשק-באר שבע", "רחובות"
-// Output: "ירושלים", "באר שבע", "רחובות"
-function toCity(to) {
+// Extract the specific destination from a raw GTFS "to" string.
+// Input examples: "אקווריום ישראל-ירושלים-3א", "מרכז ביג/המשק-באר שבע"
+// Output: "אקווריום ישראל-ירושלים", "מרכז ביג/המשק-באר שבע"
+function formatDestination(to) {
   if (!to) return '';
   // Strip trailing variant suffix: -<digits><optional Hebrew letter>
-  const clean = to.replace(/-\d+[א-ת]?$/, '').trim();
-  // The city is the last segment after a '-'
-  const dash = clean.lastIndexOf('-');
-  return dash >= 0 ? clean.slice(dash + 1).trim() : clean;
+  return to.replace(/-\d+[א-ת]?$/, '').trim();
 }
 
 // ── Single line row (li) inside a stop ──────────────────────────
-function LineRow({ route, stopId, stopName, active, onClick }) {
+function LineRow({ route, stopId, stopCode, stopName, active, onClick }) {
   const bg = route.colour || '#1e3a5f';
   const isFav = useFavoritesStore((s) => s.isFavorite(stopId, route.ref, route.relId));
   const toggle = useFavoritesStore((s) => s.toggle);
-  const dest = toCity(route.to);
+  const dest = formatDestination(route.to);
 
   const handleStar = (e) => {
     e.stopPropagation();
@@ -54,41 +50,49 @@ function LineRow({ route, stopId, stopName, active, onClick }) {
 
   return (
     <li
-      className={`flex items-center gap-2 px-2 py-1 rounded transition-colors cursor-pointer select-none
-        ${active ? 'bg-blue-950/60 ring-1 ring-blue-500/50' : 'hover:bg-gray-800/40'}`}
+      className={`flex flex-wrap items-center gap-1.5 px-2 py-1.5 rounded transition-colors cursor-pointer select-none
+        ${active ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-gray-100/40'}`}
       onMouseDown={(e) => { e.stopPropagation(); onClick(route); }}
     >
-      {/* Line number badge */}
-      <span
-        className="shrink-0 min-w-[2rem] text-center px-1.5 py-0.5 rounded text-xs font-bold font-mono text-white"
-        style={{ backgroundColor: bg }}
-      >
-        {route.ref}
-      </span>
+      <div className="flex-1 flex items-center gap-1.5 min-w-0">
+        {/* Line number badge */}
+        <span
+          className="shrink-0 min-w-[2rem] text-center px-1.5 py-0.5 rounded text-xs font-bold font-mono text-white"
+          style={{ backgroundColor: bg }}
+        >
+          {route.ref}
+        </span>
+        
+        <span className="text-gray-500 text-xs shrink-0">-</span>
 
-      {/* Direction arrow + destination */}
-      <span className="flex-1 flex items-center gap-1 min-w-0" dir="rtl">
-        <span className="text-gray-500 text-[10px] shrink-0">→</span>
-        <span className={`text-xs truncate ${dest ? 'text-gray-300' : 'text-gray-600'}`}>
+        {/* Destination */}
+        <span className={`text-xs truncate ${dest ? 'text-gray-700' : 'text-gray-600'}`} dir="rtl">
           {dest || '—'}
         </span>
-      </span>
+      </div>
 
       {/* Star */}
       <button
         onMouseDown={handleStar}
-        className={`shrink-0 transition-colors ${isFav ? 'text-yellow-400' : 'text-gray-700 hover:text-gray-400'}`}
+        className={`shrink-0 transition-colors ${isFav ? 'text-yellow-400' : 'text-gray-700 hover:text-gray-600'}`}
         title={isFav ? 'Remove from favorites' : 'Add to favorites'}
       >
         <Star size={10} fill={isFav ? 'currentColor' : 'none'} />
       </button>
+
+      {/* Arrival times (inline) */}
+      {active && (stopCode || stopId) && (
+        <div className="w-full mt-1.5 border-t border-blue-100/50 pt-1.5 pb-0.5">
+          <LineArrivalsStrip stopCode={stopCode || stopId} lineRef={route.ref} colour={route.colour} />
+        </div>
+      )}
     </li>
   );
 }
 
 // ── Compact line-specific arrivals strip ─────────────────────────
 function LineArrivalsStrip({ stopCode, lineRef, colour }) {
-  const { data: arrivals = [], isLoading, dataUpdatedAt } = useStopArrivals(stopCode);
+  const { data: arrivals = [], isLoading, isFetching, error, dataUpdatedAt } = useStopArrivals(stopCode);
 
   const lineArrivals = arrivals.filter((a) => a.lineRef === lineRef).slice(0, 4);
   const updated = dataUpdatedAt
@@ -96,27 +100,54 @@ function LineArrivalsStrip({ stopCode, lineRef, colour }) {
     : '';
 
   return (
-    <div className="flex items-center gap-1.5 mt-1 min-h-[18px]">
-      <Clock size={9} className="text-gray-500 shrink-0" />
-      {isLoading ? (
-        <Loader size={9} className="animate-spin text-gray-500" />
-      ) : lineArrivals.length === 0 ? (
-        <span className="text-[9px] text-gray-600">No arrivals in 30 min</span>
-      ) : (
-        <>
-          {lineArrivals.map((a, i) => (
-            <span key={i} className="flex items-center gap-1">
-              {i > 0 && <span className="text-gray-700">·</span>}
-              <span className={`text-[10px] font-semibold tabular-nums ${
-                a.etaMinutes <= 2 ? 'text-red-400' : a.etaMinutes <= 5 ? 'text-yellow-400' : 'text-emerald-400'
-              }`}>
-                {a.etaMinutes === 0 ? 'Now' : `${a.etaMinutes}m`}
-              </span>
-            </span>
-          ))}
-          {updated && <span className="text-[9px] text-gray-700 ml-auto shrink-0">{updated}</span>}
-        </>
-      )}
+    <div className="flex flex-col gap-1.5 min-h-[18px]">
+      <div className="flex items-center gap-1.5">
+        {isFetching && !isLoading ? (
+          <Loader size={9} className="animate-spin text-blue-500 shrink-0" />
+        ) : (
+          <Clock size={9} className="text-gray-500 shrink-0" />
+        )}
+        {isLoading ? (
+          <div className="flex items-center gap-1.5">
+            <Loader size={9} className="animate-spin text-blue-500" />
+            <span className="text-[9px] text-gray-500 font-medium italic">Fetching real-time arrivals...</span>
+          </div>
+        ) : error ? (
+          <span className="text-[9px] text-amber-500 font-medium italic">
+            {error.message.toLowerCase().includes('invalid stop code') 
+              ? 'Real-time data currently unavailable for this stop' 
+              : error.message}
+          </span>
+        ) : lineArrivals.length === 0 ? (
+          <span className="text-[9px] text-gray-400 font-medium italic">No upcoming arrivals found for this line</span>
+        ) : (
+          <>
+            {lineArrivals.map((a, i) => {
+              const arrivalDate = new Date(a.eta);
+              const isTomorrow = arrivalDate.getDate() !== new Date().getDate();
+              const timeStr = arrivalDate.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+              
+              let display;
+              if (a.etaMinutes === 0) display = 'Now';
+              else if (a.etaMinutes < 60) display = `${a.etaMinutes}m`;
+              else if (isTomorrow) display = `Tomorrow ${timeStr}`;
+              else display = timeStr;
+
+              return (
+                <span key={i} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-gray-300">·</span>}
+                  <span className={`text-[10px] font-bold tabular-nums ${
+                    a.etaMinutes <= 2 ? 'text-red-500' : a.etaMinutes <= 5 ? 'text-amber-500' : 'text-emerald-600'
+                  }`}>
+                    {display}
+                  </span>
+                </span>
+              );
+            })}
+            {updated && <span className="text-[9px] text-gray-400 ml-auto tabular-nums">Updated {updated}</span>}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -128,16 +159,17 @@ function StopRow({ stop, selected, onClick, selectedLine, onLineClick, rowRef })
   return (
     <div
       ref={rowRef}
-      className={`border-b border-gray-800/50 transition-colors ${selected ? 'bg-blue-950/20 border-l-2 border-l-blue-500' : ''}`}
+      className={`border-b border-gray-200/50 transition-colors ${selected ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
     >
       {/* Stop header — click to expand/collapse */}
       <div
         onClick={onClick}
-        className="flex items-center justify-between gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-800/30"
+        className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 cursor-pointer hover:bg-gray-100/30"
       >
         <div className="min-w-0 flex items-center gap-1.5">
           <MapPin size={11} className="text-gray-500 shrink-0" />
-          <span className="text-xs font-medium text-white truncate">{stop.name}</span>
+          <span className="text-xs font-medium text-gray-900 truncate">{stop.name}</span>
+          {stop.city && <span className="text-[10px] text-gray-600 shrink-0 truncate max-w-[80px]">({stop.city})</span>}
           {stop.ref && <span className="text-[10px] text-gray-500 shrink-0">#{stop.ref}</span>}
         </div>
         <span className="text-[10px] text-gray-500 shrink-0">{stop.distance}m</span>
@@ -151,20 +183,15 @@ function StopRow({ stop, selected, onClick, selectedLine, onLineClick, rowRef })
               key={r.ref}
               route={r}
               stopId={stop.id}
+              stopCode={stop.ref}
               stopName={stop.name}
               active={activeLineRef === r.ref}
               onClick={(route) => onLineClick(route, stop)}
             />
           ))}
-          {/* Arrivals for the active line */}
-          {activeLineRef && stop.ref && (
-            <li className="pt-0.5">
-              <LineArrivalsStrip stopCode={stop.ref} lineRef={activeLineRef} colour={selectedLine.colour} />
-            </li>
-          )}
         </ul>
       ) : (
-        <p className="text-[10px] text-gray-700 px-3 pb-1.5">No line data</p>
+        <p className="text-[10px] text-gray-700 px-2.5 pb-1.5">No line data</p>
       )}
     </div>
   );
@@ -187,7 +214,7 @@ function FavoritesContent({ selectedFavId, onSelect }) {
 
   if (favorites.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-600 py-12">
+      <div className="flex flex-col items-center justify-center h-full gap-1.5 text-gray-600 py-12">
         <Star size={28} className="opacity-30" />
         <p className="text-xs">No favorites yet</p>
         <p className="text-[10px] text-center px-8 opacity-70">Tap ★ on a line badge in Nearby or Lines tabs</p>
@@ -198,39 +225,46 @@ function FavoritesContent({ selectedFavId, onSelect }) {
   return (
     <>
       {groups.map((group) => (
-        <div key={group.stopId ?? '__lines__'} className="border-b border-gray-800">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900">
+        <div key={group.stopId ?? '__lines__'} className="border-b border-gray-200">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50">
             <MapPin size={11} className="text-gray-500 shrink-0" />
-            <span className="text-xs font-medium text-white truncate">
+            <span className="text-xs font-medium text-gray-900 truncate">
               {group.stopName || 'Lines'}
             </span>
           </div>
           {group.lines.map((fav) => {
             const active = selectedFavId === fav.id;
             return (
-              <button
+              <div
                 key={fav.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(active ? null : fav)}
-                className={`w-full flex items-center gap-2 px-3 py-2 border-t border-gray-800/50 transition-colors text-left ${
-                  active ? 'bg-blue-950/40 border-l-2 border-l-blue-500 pl-2.5' : 'hover:bg-gray-800/30'
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(active ? null : fav); } }}
+                className={`w-full flex items-center gap-1.5 px-2.5 py-2 border-t border-gray-200/50 transition-colors text-left cursor-pointer select-none ${
+                  active ? 'bg-blue-50 border-l-2 border-l-blue-500 pl-2.5' : 'hover:bg-gray-100/30'
                 }`}
               >
-                <span
-                  className="shrink-0 px-2 py-0.5 rounded text-xs font-bold font-mono text-white"
-                  style={{ backgroundColor: fav.routeColour || '#1e3a5f' }}
-                >
-                  {fav.routeRef}
-                </span>
-                <span className="flex-1 text-xs text-gray-400 truncate">
-                  {fav.routeTo ? `→ ${fav.routeTo}` : '—'}
-                </span>
+                <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                  <span
+                    className="shrink-0 min-w-[2rem] text-center px-1.5 py-0.5 rounded text-xs font-bold font-mono text-white"
+                    style={{ backgroundColor: fav.routeColour || '#1e3a5f' }}
+                  >
+                    {fav.routeRef}
+                  </span>
+                  <span className="text-gray-500 text-xs shrink-0">-</span>
+                  <span className="text-xs text-gray-600 truncate" dir="rtl">
+                    {fav.routeTo ? formatDestination(fav.routeTo) : '—'}
+                  </span>
+                </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); toggle(fav); }}
-                  className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                  className="text-gray-600 hover:text-red-400 transition-colors shrink-0 p-1"
+                  title="Remove from favorites"
                 >
                   <Trash2 size={13} />
                 </button>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -250,8 +284,8 @@ function LineResult({ line, active, loading, onSelect }) {
     routeColour: line.colour, routeTo: line.to,
   };
   return (
-    <div className={`flex items-center border-b border-gray-800/50 transition-colors ${active ? 'bg-blue-950/40 border-l-2 border-l-blue-500' : 'hover:bg-gray-800/30'}`}>
-      <button onClick={onSelect} className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left">
+    <div className={`flex items-center border-b border-gray-200/50 transition-colors ${active ? 'bg-blue-50 border-l-2 border-l-blue-500' : 'hover:bg-gray-100/30'}`}>
+      <button onClick={onSelect} className="flex-1 flex items-center gap-1.5 px-2.5 py-2 text-left">
         <span
           className="shrink-0 px-2 py-1 rounded text-xs font-bold font-mono text-white min-w-[2.5rem] text-center"
           style={{ backgroundColor: line.colour || '#1e3a5f' }}
@@ -259,7 +293,7 @@ function LineResult({ line, active, loading, onSelect }) {
           {line.ref}
         </span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate">
+          <p className="text-sm text-gray-900 truncate">
             {line.from && line.to ? `${line.from} → ${line.to}` : line.to || line.from || 'Unknown route'}
           </p>
           {line.operator && <p className="text-[10px] text-gray-500 truncate">{line.operator}</p>}
@@ -268,7 +302,7 @@ function LineResult({ line, active, loading, onSelect }) {
       </button>
       <button
         onClick={() => toggle(favEntry)}
-        className="px-3 py-2.5 transition-colors shrink-0"
+        className="px-2.5 py-2 transition-colors shrink-0"
         title={isFav ? 'Remove from favorites' : 'Add to favorites'}
       >
         <Star size={14} fill={isFav ? 'currentColor' : 'none'} className={isFav ? 'text-yellow-400' : 'text-gray-500'} />
@@ -303,12 +337,14 @@ export default function NearbyPage() {
   const { data: stops = [], isLoading: stopsLoading, error: stopsError, refetch } = useNearbyStops(coords?.lat, coords?.lng);
   const { data: routeStops = [], isFetching: routeLoading } = useRouteStops(selectedLine?.relId);
   const nearbyRouteShape = useRouteShape(selectedLine?.relId);
-  const resolveRelId = useRelIdResolver();
 
   useEffect(() => {
     if (!selectedId) return;
-    rowRefs.current[selectedId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [selectedId]);
+    const timer = setTimeout(() => {
+      rowRefs.current[selectedId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [selectedId, tab, mode]);
 
   const handleSelectStop = (id) => {
     setSelectedId((prev) => (prev === id ? null : id));
@@ -330,12 +366,6 @@ export default function NearbyPage() {
     const relId = stopCode ? `mot-line:${route.ref}:${stopCode}` : route.relId;
     setSelectedLine({ ref: route.ref, relId, colour: route.colour, stopId });
     setMode('map');
-
-    // Resolve precise relId for accurate stop/shape matching (city dedup).
-    // Result intentionally NOT fed back into selectedLine — that would re-trigger
-    // useRouteShape and cause flicker. mot-line: works for stops, shape and SIRI.
-    const stopRef = typeof stop === 'object' ? stop.ref : null;
-    if (stopRef) resolveRelId(stopRef, route.ref, route.to);
   };
 
   const clearLine = (e) => {
@@ -430,7 +460,7 @@ export default function NearbyPage() {
   const showFavRouteOnMap = tab === 'favorites' && !!selectedFav;
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen pb-16 lg:pb-0 overflow-hidden">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-screen pb-14 lg:pb-0 overflow-hidden">
 
       {/* ── Top area ── */}
       <div
@@ -438,16 +468,16 @@ export default function NearbyPage() {
         style={{ flex: topFlex, transition: 'flex 0.35s cubic-bezier(0.4,0,0.2,1)' }}
       >
         {/* Tab bar */}
-        <div className="shrink-0 bg-gray-950 border-b border-gray-800">
+        <div className="shrink-0 bg-white border-b border-gray-200">
           <div className="flex">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => handleTabChange(id)}
-                className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors flex-1 justify-center ${
+                className={`flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium border-b-2 transition-colors flex-1 justify-center ${
                   tab === id
                     ? 'border-blue-500 text-blue-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
                 <Icon size={13} />
@@ -466,9 +496,9 @@ export default function NearbyPage() {
               {/* Sub-header */}
               <div
                 onClick={handleHeaderClick}
-                className="shrink-0 cursor-pointer bg-gray-950 px-3 py-1.5 flex items-center justify-between border-b border-gray-800 select-none sticky top-0 z-10"
+                className="shrink-0 cursor-pointer bg-white px-2.5 py-1 flex items-center justify-between border-b border-gray-200 select-none sticky top-0 z-10"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   {usingFallback && (
                     <span className="text-yellow-400 text-[10px]">{fallbackLocation.name}</span>
                   )}
@@ -488,7 +518,7 @@ export default function NearbyPage() {
                 <button
                   onClick={(e) => { e.stopPropagation(); refetch(); }}
                   disabled={stopsLoading}
-                  className="text-gray-500 hover:text-white disabled:opacity-30 transition-colors"
+                  className="text-gray-500 hover:text-gray-900 disabled:opacity-30 transition-colors"
                 >
                   <RefreshCw size={12} className={stopsLoading ? 'animate-spin' : ''} />
                 </button>
@@ -527,31 +557,31 @@ export default function NearbyPage() {
           {tab === 'lines' && (
             <>
               {/* Search form */}
-              <form onSubmit={handleLineSearch} className="px-3 pt-2.5 pb-2 border-b border-gray-800 sticky top-0 z-10 bg-gray-950 space-y-2">
-                <div className="flex gap-2">
-                  <div className="flex-1 bg-gray-800 rounded-lg px-3 py-2 flex items-center gap-2">
+              <form onSubmit={handleLineSearch} className="px-2.5 pt-2.5 pb-2 border-b border-gray-200 sticky top-0 z-10 bg-white space-y-2">
+                <div className="flex gap-1.5">
+                  <div className="flex-1 bg-gray-100 rounded-lg px-2.5 py-2 flex items-center gap-1.5">
                     <Search size={13} className="text-gray-500 shrink-0" />
                     <input
                       type="text"
                       value={lineSearchInput}
                       onChange={(e) => setLineSearchInput(e.target.value)}
                       placeholder="Line number (e.g. 16)"
-                      className="flex-1 bg-transparent text-white placeholder-gray-500 text-sm outline-none"
+                      className="flex-1 bg-transparent text-gray-900 placeholder-gray-500 text-sm outline-none"
                     />
                   </div>
-                  <div className="flex-1 bg-gray-800 rounded-lg px-3 py-2 flex items-center gap-2">
+                  <div className="flex-1 bg-gray-100 rounded-lg px-2.5 py-2 flex items-center gap-1.5">
                     <MapPin size={13} className="text-gray-500 shrink-0" />
                     <input
                       type="text"
                       value={lineCityInput}
                       onChange={(e) => setLineCityInput(e.target.value)}
                       placeholder="City (optional)"
-                      className="flex-1 bg-transparent text-white placeholder-gray-500 text-sm outline-none"
+                      className="flex-1 bg-transparent text-gray-900 placeholder-gray-500 text-sm outline-none"
                     />
                   </div>
                   <button
                     type="submit"
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 rounded-lg transition-colors"
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-2.5 rounded-lg transition-colors"
                   >
                     Go
                   </button>
@@ -560,7 +590,7 @@ export default function NearbyPage() {
 
               {/* Results */}
               {linesLoading && (
-                <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                <div className="flex items-center justify-center gap-1.5 py-8 text-gray-600">
                   <Loader size={16} className="animate-spin" />
                   <span className="text-xs">Searching…</span>
                 </div>
@@ -600,17 +630,17 @@ export default function NearbyPage() {
           {tab === 'trains' && (
             <>
               {/* Station pickers */}
-              <div className="shrink-0 bg-gray-950 px-3 pt-2 pb-2 space-y-2 border-b border-gray-800 sticky top-0 z-10">
-                <div className="bg-gray-800 rounded-xl p-2.5 space-y-2">
+              <div className="shrink-0 bg-white px-2.5 pt-2 pb-2 space-y-2 border-b border-gray-200 sticky top-0 z-10">
+                <div className="bg-gray-100 rounded-xl p-2.5 space-y-2">
                   <StationPicker label="From" value={trainFrom} onChange={setTrainFrom} />
-                  <div className="border-t border-gray-700" />
+                  <div className="border-t border-gray-300" />
                   <StationPicker label="To" value={trainTo} onChange={setTrainTo} />
                 </div>
               </div>
 
               {/* Train list */}
               {trainsLoading && (
-                <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                <div className="flex items-center justify-center gap-1.5 py-8 text-gray-600">
                   <Loader size={16} className="animate-spin" />
                   <span className="text-xs">Loading trains…</span>
                 </div>
@@ -626,7 +656,7 @@ export default function NearbyPage() {
               )}
               {trainRoutes.length > 0 && (
                 <>
-                  <div className="grid grid-cols-4 px-3 py-1.5 border-b border-gray-800 text-[10px] text-gray-500 uppercase tracking-wider sticky top-[84px] bg-gray-950 z-10">
+                  <div className="grid grid-cols-4 px-2.5 py-1 border-b border-gray-200 text-[10px] text-gray-500 uppercase tracking-wider sticky top-[84px] bg-white z-10">
                     <span>Departs</span><span>Arrives</span><span>Platform</span><span>Status</span>
                   </div>
                   {trainRoutes.map((route, i) => (
@@ -646,7 +676,7 @@ export default function NearbyPage() {
 
       {/* ── Bottom: map ── */}
       <div
-        className="relative shrink-0 min-h-0 border-t-2 border-blue-900/60 rounded-t-xl overflow-hidden"
+        className="relative shrink-0 min-h-0 border-t-2 border-blue-200 rounded-t-xl overflow-hidden"
         style={{ flex: bottomFlex, transition: 'flex 0.35s cubic-bezier(0.4,0,0.2,1)' }}
       >
         {/* Floating selected-line badge */}
@@ -659,7 +689,7 @@ export default function NearbyPage() {
           return (
             <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
               <span
-                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold font-mono text-white shadow-lg"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-bold font-mono text-white shadow-lg"
                 style={{ backgroundColor: line.colour || '#1e3a5f', boxShadow: `0 2px 12px ${line.colour || '#1e3a5f'}88` }}
               >
                 🚌 {line.ref}

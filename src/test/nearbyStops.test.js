@@ -68,7 +68,7 @@ describe('haversine distance', () => {
 
 describe('mergeStopsWithRouteMap', () => {
   const baseStop = {
-    id: 'gtfs-38918', name: 'מקס נורדאו/בנימין',
+    id: '38918', name: 'מקס נורדאו/בנימין',
     ref: '38918', lat: 31.8939, lng: 34.8126,
     distance: 307, routes: [],
   };

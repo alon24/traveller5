@@ -120,7 +120,7 @@ export default function PlaceAutocomplete({ placeholder, value, onChange }) {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <MapPin size={16} className="text-gray-500 shrink-0" />
         <input
           type="text"
@@ -129,26 +129,26 @@ export default function PlaceAutocomplete({ placeholder, value, onChange }) {
           onFocus={handleFocus}
           onBlur={handleBlur}
           placeholder={placeholder}
-          className="flex-1 bg-transparent text-white placeholder-gray-500 text-sm outline-none"
+          className="flex-1 bg-transparent text-gray-900 placeholder-gray-500 text-sm outline-none"
         />
         {input && (
-          <button onClick={clear} className="text-gray-500 hover:text-gray-300">
+          <button onClick={clear} className="text-gray-500 hover:text-gray-700">
             <X size={14} />
           </button>
         )}
       </div>
 
       {(showSuggestions || showRecent) && (
-        <ul className="absolute top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden z-50 shadow-xl max-h-64 overflow-y-auto">
+        <ul className="absolute top-full left-0 right-0 mt-1 bg-gray-50 border border-gray-300 rounded-lg overflow-hidden z-50 shadow-xl max-h-64 overflow-y-auto">
           {showSuggestions && suggestions.map((s) => (
             <li key={s.place_id}>
               <button
-                className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors flex items-center gap-2"
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
                 onMouseDown={() => handleSelect(s)}
               >
                 <MapPin size={13} className="text-gray-500 shrink-0" />
                 <span>
-                  <span className="font-medium text-white">{s.structured_formatting.main_text}</span>
+                  <span className="font-medium text-gray-900">{s.structured_formatting.main_text}</span>
                   <span className="text-gray-500 ml-2">{s.structured_formatting.secondary_text}</span>
                 </span>
               </button>
@@ -157,13 +157,13 @@ export default function PlaceAutocomplete({ placeholder, value, onChange }) {
 
           {showRecent && (
             <>
-              <li className="px-4 py-1.5 text-xs text-gray-500 uppercase tracking-wider bg-gray-900 sticky top-0">
+              <li className="px-4 py-1 text-xs text-gray-500 uppercase tracking-wider bg-gray-50 sticky top-0">
                 Recent
               </li>
               {recent.map((p, i) => (
                 <li key={i}>
                   <button
-                    className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-800 transition-colors flex items-center gap-2"
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
                     onMouseDown={() => handleRecentSelect(p)}
                   >
                     <Clock size={13} className="text-gray-500 shrink-0" />
